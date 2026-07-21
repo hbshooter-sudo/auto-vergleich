@@ -11,8 +11,8 @@ export default function CarComparator() {
   useEffect(() => {
     async function fetchCars() {
       // Supabase-Verbindung sicher erst zur Laufzeit im Browser aufbauen
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://gcqcmqcptwvzhuivfbvi.supabase.co';
-      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+      const url = 'https://gcqcmqcptwvzhuivfbvi.supabase.co/';
+      const key = 'sb_publishable_-PtrOK_5RmXee4XxrZb4CA_FEQ1E1Ak';
 
       if (!url || !key) {
         console.error('Supabase URL oder Key fehlt!');
