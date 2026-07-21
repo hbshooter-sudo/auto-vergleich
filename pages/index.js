@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-// Supabase Verbindung sicher aufbauen
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://gcqcmqcptwvzhuivfbvi.supabase.co/';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sbpublishable-Ptr0K_5RmXee4XxrZb4CA_FEQ1E...';
+// Supabase Verbindung aufbauen (mit Fallback-URLs zur Sicherheit)
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://gcqcmqcptwvzhuivfbvi.supabase.co';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_-Ptr0K_5RmXee4XxrZb4CA_FEQ1E';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+export default function CarComparator() {
   const [cars, setCars] = useState([]);
   const [carA, setCarA] = useState(null);
   const [carB, setCarB] = useState(null);
@@ -26,116 +28,121 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey);
     fetchCars();
   }, []);
 
-  if (loading) return <div style={{ padding: '40px', textAlign: 'center' }}>🔄 Lade Fahrzeugdaten aus der Datenbank...</div>;
-  if (!carA || !carB) return <div style={{ padding: '40px' }}>Keine Autos in der Datenbank gefunden.</div>;
+  if (loading) return <div style={{ padding: '40px', textAlign: 'center' }}>Lade Fahrzeugdaten aus der Datenbank...</div>;
+  if (!carA || !carB) return <div style={{ padding: '40px', textAlign: 'center' }}>Keine Autos in der Datenbank gefunden.</div>;
 
   const scale = 300 / 5000; // Maßstabsberechnung (5000mm max)
 
   return (
     <div style={{ fontFamily: 'sans-serif', padding: '20px', maxWidth: '900px', margin: '0 auto' }}>
       <h1>🚗 Einfacher Auto-Vergleich für Jeden</h1>
-      
+
       {/* Auto-Auswahl */}
       <div style={{ display: 'flex', gap: '20px', marginBottom: '30px' }}>
         <div>
-          <label><strong>Auto 1: </strong></label>
+          <label><strong>Auto 1:</strong> </label>
           <select value={carA.id} onChange={(e) => setCarA(cars.find(c => c.id === e.target.value))}>
             {cars.map(c => <option key={c.id} value={c.id}>{c.brand} {c.model} ({c.year})</option>)}
           </select>
         </div>
         <div>
-          <label><strong>Auto 2: </strong></label>
+          <label><strong>Auto 2:</strong> </label>
           <select value={carB.id} onChange={(e) => setCarB(cars.find(c => c.id === e.target.value))}>
             {cars.map(c => <option key={c.id} value={c.id}>{c.brand} {c.model} ({c.year})</option>)}
           </select>
         </div>
       </div>
 
-      {/* VISUELLER GRÖSSENVERGLEICH */}
-      <div style={{ background: '#f8f9fa', padding: '20px', borderRadius: '12px', marginBottom: '30px', border: '1px solid #e9ecef' }}>
-        <h3>📐 Visueller Größenvergleich (Länge & Höhe)</h3>
-        <svg width="100%" height="160" viewBox="0 0 350 160">
-          <line x1="10" y1="140" x2="340" y2="140" stroke="#adb5bd" strokeWidth="2" />
-          
-          {/* Auto 1 (Blau) */}
-          <rect 
-            x="20" 
-            y={140 - (carA.height_mm * scale)} 
-            width={carA.length_mm * scale} 
-            height={carA.height_mm * scale} 
-            fill="rgba(0, 122, 255, 0.35)" 
-            stroke="#007AFF" 
-            strokeWidth="2.5"
-            rx="8"
-          />
-          
-          {/* Auto 2 (Orange) */}
-          <rect 
-            x="20" 
-            y={140 - (carB.height_mm * scale)} 
-            width={carB.length_mm * scale} 
-            height={carB.height_mm * scale} 
-            fill="rgba(255, 149, 0, 0.35)" 
-            stroke="#FF9500" 
-            strokeWidth="2.5"
-            rx="8"
-          />
-        </svg>
-        <p style={{ fontSize: '0.9em', color: '#495057' }}>
-          🔵 <strong style={{color: '#007AFF'}}>{carA.brand} {carA.model}</strong> ({carA.length_mm}mm lang) vs. 
-          🟠 <strong style={{color: '#FF9500'}}>{carB.brand} {carB.model}</strong> ({carB.length_mm}mm lang)
-        </p>
-      </div>
-
-      {/* KOFFERRAUM & ALLTAGSTAUGLICHKEIT */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '30px' }}>
-        <div style={{ border: '1px solid #dee2e6', padding: '15px', borderRadius: '8px', background: '#fff' }}>
-          <h4>🧳 Kofferraum: {carA.brand} {carA.model}</h4>
-          <p><strong>Volumen:</strong> {carA.boot_capacity_liters} Liter</p>
-          <p><strong>Platz für ca.:</strong> {'🧃 '.repeat(carA.boot_crates_count || 1)} ({carA.boot_crates_count} Getränkekisten)</p>
-          <p style={{ fontSize: '0.85em', color: '#6c757d' }}><em>"{carA.layman_summary}"</em></p>
+      {/* Visueller Längenvergleich */}
+      <h2>📏 Visueller Größenvergleich (Länge)</h2>
+      <div style={{ background: '#f5f5f5', padding: '20px', borderRadius: '8px', marginBottom: '30px' }}>
+        <div style={{ marginBottom: '15px' }}>
+          <strong>{carA.brand} {carA.model} ({carA.length_mm} mm):</strong>
+          <div style={{
+            width: `${carA.length_mm * scale}px`,
+            height: '40px',
+            backgroundColor: '#3b82f6',
+            color: 'white',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: '4px',
+            marginTop: '5px',
+            fontSize: '12px'
+          }}>
+            {carA.brand} {carA.model}
+          </div>
         </div>
-        <div style={{ border: '1px solid #dee2e6', padding: '15px', borderRadius: '8px', background: '#fff' }}>
-          <h4>🧳 Kofferraum: {carB.brand} {carB.model}</h4>
-          <p><strong>Volumen:</strong> {carB.boot_capacity_liters} Liter</p>
-          <p><strong>Platz für ca.:</strong> {'🧃 '.repeat(carB.boot_crates_count || 1)} ({carB.boot_crates_count} Getränkekisten)</p>
-          <p style={{ fontSize: '0.85em', color: '#6c757d' }}><em>"{carB.layman_summary}"</em></p>
+
+        <div>
+          <strong>{carB.brand} {carB.model} ({carB.length_mm} mm):</strong>
+          <div style={{
+            width: `${carB.length_mm * scale}px`,
+            height: '40px',
+            backgroundColor: '#ef4444',
+            color: 'white',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: '4px',
+            marginTop: '5px',
+            fontSize: '12px'
+          }}>
+            {carB.brand} {carB.model}
+          </div>
         </div>
       </div>
 
-      {/* KOSTEN & REPARATUR-RISIKO */}
-      <h3>💰 Echte Gesamtkosten & Zuverlässigkeit</h3>
-      <table border="1" cellPadding="10" style={{ width: '100%', borderCollapse: 'collapse', borderColor: '#dee2e6' }}>
+      {/* Alltagstauglichkeit */}
+      <h2>🛒 Kofferraum & Alltag</h2>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '30px' }}>
         <thead>
-          <tr style={{ background: '#f1f3f5' }}>
-            <th>Kriterium</th>
-            <th>{carA.brand} {carA.model}</th>
-            <th>{carB.brand} {carB.model}</th>
+          <tr style={{ background: '#e5e7eb', textAlign: 'left' }}>
+            <th style={{ padding: '10px' }}>Eigenschaft</th>
+            <th style={{ padding: '10px', color: '#2563eb' }}>{carA.brand} {carA.model}</th>
+            <th style={{ padding: '10px', color: '#dc2626' }}>{carB.brand} {carB.model}</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>Durchschnittlicher Gebrauchtwagenpreis</strong></td>
-            <td>ca. {carA.price_used_avg ? carA.price_used_avg + ' €' : 'k.A.'}</td>
-            <td>ca. {carB.price_used_avg ? carB.price_used_avg + ' €' : 'k.A.'}</td>
+            <td style={{ padding: '10px', borderBottom: '1px solid #ddd' }}>Kofferraum-Volumen</td>
+            <td style={{ padding: '10px', borderBottom: '1px solid #ddd' }}>{carA.boot_capacity_liters} Liter</td>
+            <td style={{ padding: '10px', borderBottom: '1px solid #ddd' }}>{carB.boot_capacity_liters} Liter</td>
           </tr>
           <tr>
-            <td><strong>Verbrauch</strong></td>
-            <td>{carA.fuel_consumption_100km} L / 100km</td>
-            <td>{carB.fuel_consumption_100km} L / 100km</td>
+            <td style={{ padding: '10px', borderBottom: '1px solid #ddd' }}>Getränkekisten (ca.)</td>
+            <td style={{ padding: '10px', borderBottom: '1px solid #ddd' }}>📦 {carA.boot_crates_count} Kisten</td>
+            <td style={{ padding: '10px', borderBottom: '1px solid #ddd' }}>📦 {carB.boot_crates_count} Kisten</td>
           </tr>
           <tr>
-            <td><strong>Zuverlässigkeit</strong></td>
-            <td>{carA.reliability_score} / 10 ⭐</td>
-            <td>{carB.reliability_score} / 10 ⭐</td>
-          </tr>
-          <tr>
-            <td><strong>Laien-Tipp / Mängel</strong></td>
-            <td style={{ fontSize: '0.85em' }}>{carA.reliability_notes}</td>
-            <td style={{ fontSize: '0.85em' }}>{carB.reliability_notes}</td>
+            <td style={{ padding: '10px', borderBottom: '1px solid #ddd' }}>Zusammenfassung</td>
+            <td style={{ padding: '10px', borderBottom: '1px solid #ddd' }}>{carA.layman_summary}</td>
+            <td style={{ padding: '10px', borderBottom: '1px solid #ddd' }}>{carB.layman_summary}</td>
           </tr>
         </tbody>
       </table>
+
+      {/* Kosten pro Jahr */}
+      <h2>💰 Laufende Kosten pro Jahr (Schätzung)</h2>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+        <div style={{ background: '#eff6ff', padding: '15px', borderRadius: '8px' }}>
+          <h3>{carA.brand} {carA.model}</h3>
+          <p>Wertverlust: ~{carA.depreciation_per_year} € / Jahr</p>
+          <p>Wartung: ~{carA.maintenance_per_year} € / Jahr</p>
+          <p>Versicherung: ~{carA.insurance_per_year} € / Jahr</p>
+          <hr />
+          <p><strong>Gesamt-Laufkosten: ~{(carA.depreciation_per_year || 0) + (carA.maintenance_per_year || 0) + (carA.insurance_per_year || 0)} € / Jahr</strong></p>
+        </div>
+
+        <div style={{ background: '#fef2f2', padding: '15px', borderRadius: '8px' }}>
+          <h3>{carB.brand} {carB.model}</h3>
+          <p>Wertverlust: ~{carB.depreciation_per_year} € / Jahr</p>
+          <p>Wartung: ~{carB.maintenance_per_year} € / Jahr</p>
+          <p>Versicherung: ~{carB.insurance_per_year} € / Jahr</p>
+          <hr />
+          <p><strong>Gesamt-Laufkosten: ~{(carB.depreciation_per_year || 0) + (carB.maintenance_per_year || 0) + (carB.insurance_per_year || 0)} € / Jahr</strong></p>
+        </div>
+      </div>
     </div>
   );
-} 
+}
