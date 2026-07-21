@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-// Supabase Verbindung aufbauen
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+// Supabase Verbindung sicher aufbauen (Fallback verhindert Build-Absturz)
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL  'https://gcqcmqcptwvzhuivfbvi.supabase.co/';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY  '';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
 export default function CarComparator() {
   const [cars, setCars] = useState([]);
   const [carA, setCarA] = useState(null);
