@@ -1,11 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-// Supabase Verbindung aufbauen (mit Fallback-URLs zur Sicherheit)
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://gcqcmqcptwvzhuivfbvi.supabase.co';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_-Ptr0K_5RmXee4XxrZb4CA_FEQ1E';
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
 export default function CarComparator() {
   const [cars, setCars] = useState([]);
   const [carA, setCarA] = useState(null);
@@ -15,7 +10,19 @@ export default function CarComparator() {
   // Autos aus Supabase laden
   useEffect(() => {
     async function fetchCars() {
+      // Supabase-Verbindung sicher erst zur Laufzeit im Browser aufbauen
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://gcqcmqcptwvzhuivfbvi.supabase.co';
+      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+      if (!url || !key) {
+        console.error('Supabase URL oder Key fehlt!');
+        setLoading(false);
+        return;
+      }
+
+      const supabase = createClient(url, key);
       const { data, error } = await supabase.from('cars').select('*');
+      
       if (error) {
         console.error('Fehler beim Laden:', error);
       } else if (data && data.length > 0) {
