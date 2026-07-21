@@ -140,4 +140,4 @@ export default function CarComparator() {
       </table>
     </div>
   );
-}
+} 
