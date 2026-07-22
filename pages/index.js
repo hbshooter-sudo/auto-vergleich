@@ -36,7 +36,20 @@ export default function CarSizedPro() {
     fetchCars();
   }, []);
 
-  // Hilfsfunktion zur Ausführung der KI-Suche mit externem Text
+  // Instant-Suche beim Tippen (Debounce)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (userQuery.trim()) {
+        executeSearch(userQuery);
+      } else {
+        setRecommendations([]);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [userQuery, cars]);
+
+  // Hilfsfunktion zur Ausführung der KI-Suche
   const runAiSearch = (queryText) => {
     setUserQuery(queryText);
     executeSearch(queryText);
@@ -67,7 +80,6 @@ export default function CarSizedPro() {
           score += 5;
           reasons.push(`Passt ins Budget (${price.toLocaleString()} €)`);
         } else if (price > maxBudget) {
-          // Ausschluss bei Überschreiten des Budgets
           score = -1;
         }
       }
@@ -110,12 +122,12 @@ export default function CarSizedPro() {
     return valA < valB ? { color: '#34d399', fontWeight: 'bold' } : { color: '#f87171' };
   };
 
-  // Skeleton-Bildschirm beim Laden
+  // Skeleton-Bildschirm
   if (loading) {
     return (
       <div style={{ padding: '60px 20px', backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', justifyContent: 'center' }}>
         <div style={{ maxWidth: '800px', width: '100%' }}>
-          <div style={{ height: '40px', backgroundColor: '#1e293b', borderRadius: '8px', marginBottom: '20px', animation: 'pulse 1.5s infinite' }} />
+          <div style={{ height: '40px', backgroundColor: '#1e293b', borderRadius: '8px', marginBottom: '20px' }} />
           <div style={{ height: '150px', backgroundColor: '#1e293b', borderRadius: '16px', marginBottom: '20px' }} />
           <div style={{ height: '200px', backgroundColor: '#1e293b', borderRadius: '16px' }} />
         </div>
@@ -132,17 +144,29 @@ export default function CarSizedPro() {
   }
 
   const getWidthPercent = (lengthMm) => ((lengthMm || 4000) / 5200) * 100;
+  const getBootPercent = (bootLiters) => Math.min(((bootLiters || 0) / 800) * 100, 100);
+
+  // Schema.org Daten für Google
+  const schemaData = {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    "name": `${carA.brand} ${carA.model} vs ${carB.brand} ${carB.model}`,
+    "description": "Vergleich von Abmessungen, Kofferraumvolumen und Unterhaltskosten."
+  };
 
   return (
-    <div style={{ fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#0f172a', color: '#f8fafc', minHeight: '100vh', padding: '30px 15px' }}>
+    <div style={{ fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#0f172a', color: '#f8fafc', minHeight: '100vh', padding: '30px 15px 90px 15px' }}>
       
-      {/* SEO & OpenGraph Metadaten */}
+      {/* SEO, OpenGraph & JSON-LD Metadaten */}
       <Head>
         <title>Auto-Vergleicher & KI-Kaufberater | Größen- & Kostenvergleich</title>
         <meta name="description" content="Vergleiche Autos nach Unterhaltskosten, Abmessungen und Verbrauch mit intelligenter KI-Kaufberatung." />
         <meta property="og:title" content="Auto-Vergleicher & KI-Kaufberater" />
         <meta property="og:description" content="Finde das perfekte Auto mit individuellem Größen- und Unterhaltskosten-Vergleich." />
-        <meta property="og:type" content="website" />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(schemaData) }}
+        />
       </Head>
 
       <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
@@ -155,11 +179,11 @@ export default function CarSizedPro() {
           <p style={{ color: '#94a3b8' }}>Visueller Größenvergleich, Unterhaltskosten & KI-Kaufberatung</p>
         </header>
 
-        {/* 1. SEKTION: KI-FREITEXT KAUFBERATER */}
+        {/* 1. SEKTION: KI-FREITEXT KAUFBERATER (mit Instant-Search) */}
         <section style={{ background: '#1e293b', padding: '25px', borderRadius: '16px', marginBottom: '40px', border: '1px solid #3b82f6' }}>
           <h2 style={{ fontSize: '1.4rem', color: '#60a5fa', marginBottom: '10px' }}>🤖 Smartes KI-Kaufberater-System</h2>
           <p style={{ color: '#94a3b8', fontSize: '0.95rem', marginBottom: '15px' }}>
-            Beschreiben Sie Ihre Wünsche in eigenen Worten oder nutzen Sie die Schnell-Filter:
+            Ergebnisse aktualisieren sich direkt beim Tippen:
           </p>
 
           {/* Schnell-Filter-Buttons */}
@@ -193,17 +217,16 @@ export default function CarSizedPro() {
           <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
             <input 
               type="text" 
-              placeholder="z. B. Elektroauto mit großem Kofferraum für unter 40.000 €..." 
+              placeholder="Tippe z. B. 'Elektro 30000 €' oder 'Diesel Kombi'..." 
               value={userQuery}
               onChange={(e) => setUserQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAiSearch()}
               style={{ flex: 1, padding: '14px', borderRadius: '8px', border: '1px solid #334155', background: '#0f172a', color: '#fff', fontSize: '1rem', outline: 'none' }}
             />
             <button 
               onClick={handleAiSearch}
               style={{ padding: '0 24px', backgroundColor: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}
             >
-              Empfehlung finden
+              Suchen
             </button>
           </div>
 
@@ -225,9 +248,9 @@ export default function CarSizedPro() {
           )}
         </section>
 
-        {/* 2. SEKTION: VISUELLER GRÖSSENVERGLEICH */}
+        {/* 2. SEKTION: VISUELLER GRÖSSEN- & KOFFERRAUMVERGLEICH */}
         <section style={{ background: '#1e293b', padding: '25px', borderRadius: '16px', marginBottom: '40px' }}>
-          <h2 style={{ fontSize: '1.4rem', marginBottom: '20px', color: '#38bdf8' }}>📏 Visueller Maßstabs-Vergleich</h2>
+          <h2 style={{ fontSize: '1.4rem', marginBottom: '20px', color: '#38bdf8' }}>📏 Visueller Maßstabs- & Platzvergleich</h2>
           
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', marginBottom: '20px' }}>
             <div>
@@ -253,16 +276,29 @@ export default function CarSizedPro() {
             </div>
           </div>
 
-          {/* Balken-Längenvergleich */}
-          <div style={{ background: '#0f172a', padding: '20px', borderRadius: '12px' }}>
-            <div style={{ marginBottom: '20px' }}>
-              <div style={{ fontSize: '0.9rem', marginBottom: '5px' }}>{carA.brand} {carA.model} ({carA.length_mm} mm)</div>
-              <div style={{ width: `${getWidthPercent(carA.length_mm)}%`, height: '45px', backgroundColor: '#38bdf8', borderRadius: '6px', transition: 'width 0.3s ease' }} />
+          {/* Balken 1: Fahrzeuglänge */}
+          <div style={{ background: '#0f172a', padding: '20px', borderRadius: '12px', marginBottom: '15px' }}>
+            <h4 style={{ margin: '0 0 15px 0', color: '#94a3b8', fontSize: '0.9rem' }}>🚘 Fahrzeuglänge (mm)</h4>
+            <div style={{ marginBottom: '15px' }}>
+              <div style={{ fontSize: '0.85rem', marginBottom: '5px' }}>{carA.brand} {carA.model}: {carA.length_mm || 0} mm</div>
+              <div style={{ width: `${getWidthPercent(carA.length_mm)}%`, height: '35px', backgroundColor: '#38bdf8', borderRadius: '6px', transition: 'width 0.3s ease' }} />
             </div>
-
             <div>
-              <div style={{ fontSize: '0.9rem', marginBottom: '5px' }}>{carB.brand} {carB.model} ({carB.length_mm} mm)</div>
-              <div style={{ width: `${getWidthPercent(carB.length_mm)}%`, height: '45px', backgroundColor: '#f43f5e', borderRadius: '6px', transition: 'width 0.3s ease' }} />
+              <div style={{ fontSize: '0.85rem', marginBottom: '5px' }}>{carB.brand} {carB.model}: {carB.length_mm || 0} mm</div>
+              <div style={{ width: `${getWidthPercent(carB.length_mm)}%`, height: '35px', backgroundColor: '#f43f5e', borderRadius: '6px', transition: 'width 0.3s ease' }} />
+            </div>
+          </div>
+
+          {/* Balken 2: Kofferraumvolumen */}
+          <div style={{ background: '#0f172a', padding: '20px', borderRadius: '12px' }}>
+            <h4 style={{ margin: '0 0 15px 0', color: '#94a3b8', fontSize: '0.9rem' }}>🧳 Kofferraumvolumen (Liter)</h4>
+            <div style={{ marginBottom: '15px' }}>
+              <div style={{ fontSize: '0.85rem', marginBottom: '5px' }}>{carA.brand} {carA.model}: {carA.boot_capacity_liters || 0} L</div>
+              <div style={{ width: `${getBootPercent(carA.boot_capacity_liters)}%`, height: '35px', backgroundColor: '#10b981', borderRadius: '6px', transition: 'width 0.3s ease' }} />
+            </div>
+            <div>
+              <div style={{ fontSize: '0.85rem', marginBottom: '5px' }}>{carB.brand} {carB.model}: {carB.boot_capacity_liters || 0} L</div>
+              <div style={{ width: `${getBootPercent(carB.boot_capacity_liters)}%`, height: '35px', backgroundColor: '#f59e0b', borderRadius: '6px', transition: 'width 0.3s ease' }} />
             </div>
           </div>
         </section>
@@ -272,53 +308,64 @@ export default function CarSizedPro() {
           <div style={{ padding: '20px 25px', background: '#334155' }}>
             <h2 style={{ margin: 0, fontSize: '1.4rem' }}>💰 Detaillierter Kosten- & Zuverlässigkeitsvergleich</h2>
           </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid #334155', color: '#94a3b8' }}>
-                <th style={{ padding: '15px 20px' }}>Kriterium</th>
-                <th style={{ padding: '15px 20px', color: '#38bdf8' }}>{carA.brand} {carA.model}</th>
-                <th style={{ padding: '15px 20px', color: '#f43f5e' }}>{carB.brand} {carB.model}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr style={{ borderBottom: '1px solid #334155' }}>
-                <td style={{ padding: '12px 20px' }}>Antriebsart</td>
-                <td style={{ padding: '12px 20px' }}>{carA.fuel_type || 'k. A.'}</td>
-                <td style={{ padding: '12px 20px' }}>{carB.fuel_type || 'k. A.'}</td>
-              </tr>
-              <tr style={{ borderBottom: '1px solid #334155' }}>
-                <td style={{ padding: '12px 20px' }}>Neupreis / Gebrauchtwagenpreis</td>
-                <td style={{ padding: '12px 20px' }}>{carA.new_price ? `${carA.new_price.toLocaleString()} €` : '-'} / {carA.used_price ? `${carA.used_price.toLocaleString()} €` : '-'}</td>
-                <td style={{ padding: '12px 20px' }}>{carB.new_price ? `${carB.new_price.toLocaleString()} €` : '-'} / {carB.used_price ? `${carB.used_price.toLocaleString()} €` : '-'}</td>
-              </tr>
-              <tr style={{ borderBottom: '1px solid #334155' }}>
-                <td style={{ padding: '12px 20px' }}>Versicherung / Jahr</td>
-                <td style={{ padding: '12px 20px', ...getCostStyle(carA.insurance_per_year, carB.insurance_per_year) }}>
-                  ~{carA.insurance_per_year || 0} €
-                </td>
-                <td style={{ padding: '12px 20px', ...getCostStyle(carB.insurance_per_year, carA.insurance_per_year) }}>
-                  ~{carB.insurance_per_year || 0} €
-                </td>
-              </tr>
-              <tr style={{ borderBottom: '1px solid #334155' }}>
-                <td style={{ padding: '12px 20px' }}>Service- & Wartungskosten / Jahr</td>
-                <td style={{ padding: '12px 20px', ...getCostStyle(carA.maintenance_per_year, carB.maintenance_per_year) }}>
-                  ~{carA.maintenance_per_year || 0} €
-                </td>
-                <td style={{ padding: '12px 20px', ...getCostStyle(carB.maintenance_per_year, carA.maintenance_per_year) }}>
-                  ~{carB.maintenance_per_year || 0} €
-                </td>
-              </tr>
-              <tr style={{ borderBottom: '1px solid #334155' }}>
-                <td style={{ padding: '12px 20px' }}>Reparaturanfälligkeit</td>
-                <td style={{ padding: '12px 20px' }}>{carA.reliability_index || 'Normal'}</td>
-                <td style={{ padding: '12px 20px' }}>{carB.reliability_index || 'Normal'}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '500px' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid #334155', color: '#94a3b8' }}>
+                  <th style={{ padding: '15px 20px' }}>Kriterium</th>
+                  <th style={{ padding: '15px 20px', color: '#38bdf8' }}>{carA.brand} {carA.model}</th>
+                  <th style={{ padding: '15px 20px', color: '#f43f5e' }}>{carB.brand} {carB.model}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style={{ borderBottom: '1px solid #334155' }}>
+                  <td style={{ padding: '12px 20px' }}>Antriebsart</td>
+                  <td style={{ padding: '12px 20px' }}>{carA.fuel_type || 'k. A.'}</td>
+                  <td style={{ padding: '12px 20px' }}>{carB.fuel_type || 'k. A.'}</td>
+                </tr>
+                <tr style={{ borderBottom: '1px solid #334155' }}>
+                  <td style={{ padding: '12px 20px' }}>Neupreis / Gebrauchtwagenpreis</td>
+                  <td style={{ padding: '12px 20px' }}>{carA.new_price ? `${carA.new_price.toLocaleString()} €` : '-'} / {carA.used_price ? `${carA.used_price.toLocaleString()} €` : '-'}</td>
+                  <td style={{ padding: '12px 20px' }}>{carB.new_price ? `${carB.new_price.toLocaleString()} €` : '-'} / {carB.used_price ? `${carB.used_price.toLocaleString()} €` : '-'}</td>
+                </tr>
+                <tr style={{ borderBottom: '1px solid #334155' }}>
+                  <td style={{ padding: '12px 20px' }}>Versicherung / Jahr</td>
+                  <td style={{ padding: '12px 20px', ...getCostStyle(carA.insurance_per_year, carB.insurance_per_year) }}>
+                    ~{carA.insurance_per_year || 0} €
+                  </td>
+                  <td style={{ padding: '12px 20px', ...getCostStyle(carB.insurance_per_year, carA.insurance_per_year) }}>
+                    ~{carB.insurance_per_year || 0} €
+                  </td>
+                </tr>
+                <tr style={{ borderBottom: '1px solid #334155' }}>
+                  <td style={{ padding: '12px 20px' }}>Service- & Wartungskosten / Jahr</td>
+                  <td style={{ padding: '12px 20px', ...getCostStyle(carA.maintenance_per_year, carB.maintenance_per_year) }}>
+                    ~{carA.maintenance_per_year || 0} €
+                  </td>
+                  <td style={{ padding: '12px 20px', ...getCostStyle(carB.maintenance_per_year, carA.maintenance_per_year) }}>
+                    ~{carB.maintenance_per_year || 0} €
+                  </td>
+                </tr>
+                <tr style={{ borderBottom: '1px solid #334155' }}>
+                  <td style={{ padding: '12px 20px' }}>Reparaturanfälligkeit</td>
+                  <td style={{ padding: '12px 20px' }}>{carA.reliability_index || 'Normal'}</td>
+                  <td style={{ padding: '12px 20px' }}>{carB.reliability_index || 'Normal'}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
 
       </div>
+
+      {/* STICKY VERGLEICHS-BAR (am unteren Bildschirmrand) */}
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, backgroundColor: '#1e293b', borderTop: '2px solid #3b82f6', padding: '10px 20px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px', zIndex: 100, boxShadow: '0 -4px 15px rgba(0,0,0,0.5)' }}>
+        <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>Aktueller Vergleich:</span>
+        <span style={{ fontWeight: 'bold', color: '#38bdf8', fontSize: '0.9rem' }}>{carA.brand} {carA.model}</span>
+        <span style={{ color: '#64748b' }}>VS</span>
+        <span style={{ fontWeight: 'bold', color: '#f43f5e', fontSize: '0.9rem' }}>{carB.brand} {carB.model}</span>
+      </div>
+
     </div>
   );
 }
