@@ -1,58 +1,37 @@
 import React, { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
 
 export default function CarComparator() {
-  // Lokale Supabase-Daten
-  const [supabaseCars, setSupabaseCars] = useState([]);
-  
-  // Dynamische API-Daten (CarQuery)
   const [makes, setMakes] = useState([]);
-  const [selectedMakeA, setSelectedMakeA] = useState('');
-  const [selectedMakeB, setSelectedMakeB] = useState('');
+  const [selectedMakeA, setSelectedMakeA] = useState('volkswagen');
+  const [selectedMakeB, setSelectedMakeB] = useState('bmw');
   
   const [modelsA, setModelsA] = useState([]);
   const [modelsB, setModelsB] = useState([]);
   
-  const [carA, setCarA] = useState(null);
-  const [carB, setCarB] = useState(null);
-  
   const [loading, setLoading] = useState(true);
 
-  // 1. Supabase-Daten & Marken-Liste der API beim Start laden
+  // 1. Top-Marken laden (sicher über HTTPS)
   useEffect(() => {
-    async function initData() {
-      // Supabase initialisieren
-      const url = 'https://gcqcmqcptwvzhuivfbvi.supabase.co';
-      const key = 'sb_publishable_-PtrOK_5RmXee4XxrZb4CA_FEQ1E1Ak';
-      
-      if (url && key) {
-        const supabase = createClient(url, key);
-        const { data } = await supabase.from('cars').select('*');
-        if (data) setSupabaseCars(data);
-      }
-
-      // Freie Marken von der CarQuery API abrufen
+    async function fetchMakes() {
       try {
-        const res = await fetch('https://www.carqueryapi.com/api/0.3/?cmd=getMakes');
-        const text = await res.text();
-        // JSONP-Fix für CarQuery API
-        const cleanedText = text.replace('? (', '').replace(');', '').replace('?', '');
-        const parsed = JSON.parse(cleanedText);
-        
-        if (parsed && parsed.Makes) {
-          setMakes(parsed.Makes);
-          // Standard-Auswahl setzen (z. B. Volkswagen & BMW)
-          setSelectedMakeA('volkswagen');
-          setSelectedMakeB('bmw');
+        const res = await fetch('https://vpic.nhtsa.dot.gov/api/vehicles/getallmakes?format=json');
+        const data = await res.json();
+        if (data && data.Results) {
+          // Sortieren und filtern
+          const popularMakes = ['volkswagen', 'bmw', 'audi', 'mercedes-benz', 'tesla', 'toyota', 'porsche', 'ford', 'hyundai', 'kia', 'fiat', 'volvo'];
+          const sortedMakes = data.Results
+            .filter(m => popularMakes.includes(m.Make_Name.toLowerCase()))
+            .sort((a, b) => a.Make_Name.localeCompare(b.Make_Name));
+            
+          setMakes(sortedMakes.length > 0 ? sortedMakes : data.Results.slice(0, 50));
         }
       } catch (err) {
-        console.error('Fehler beim Laden der Fahrzeugmarken:', err);
+        console.error('Fehler beim Laden der Marken:', err);
+      } finally {
+        setLoading(false);
       }
-      
-      setLoading(false);
     }
-
-    initData();
+    fetchMakes();
   }, []);
 
   // 2. Modelle für Marke A laden
@@ -60,12 +39,10 @@ export default function CarComparator() {
     if (!selectedMakeA) return;
     async function fetchModelsA() {
       try {
-        const res = await fetch(`https://www.carqueryapi.com/api/0.3/?cmd=getModels&make=${selectedMakeA}`);
-        const text = await res.text();
-        const cleanedText = text.replace('? (', '').replace(');', '').replace('?', '');
-        const parsed = JSON.parse(cleanedText);
-        if (parsed && parsed.Models) {
-          setModelsA(parsed.Models);
+        const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/getmodelsformake/${selectedMakeA}?format=json`);
+        const data = await res.json();
+        if (data && data.Results) {
+          setModelsA(data.Results);
         }
       } catch (err) {
         console.error(err);
@@ -79,12 +56,10 @@ export default function CarComparator() {
     if (!selectedMakeB) return;
     async function fetchModelsB() {
       try {
-        const res = await fetch(`https://www.carqueryapi.com/api/0.3/?cmd=getModels&make=${selectedMakeB}`);
-        const text = await res.text();
-        const cleanedText = text.replace('? (', '').replace(');', '').replace('?', '');
-        const parsed = JSON.parse(cleanedText);
-        if (parsed && parsed.Models) {
-          setModelsB(parsed.Models);
+        const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/getmodelsformake/${selectedMakeB}?format=json`);
+        const data = await res.json();
+        if (data && data.Results) {
+          setModelsB(data.Results);
         }
       } catch (err) {
         console.error(err);
@@ -96,7 +71,7 @@ export default function CarComparator() {
   if (loading) {
     return (
       <div style={{ padding: '60px', textAlign: 'center', fontFamily: 'system-ui, sans-serif' }}>
-        <h2>🚗 Verbinde mit weltweiter Fahrzeug-API...</h2>
+        <h2>🚗 Verbinde mit globaler Fahrzeug-API (HTTPS)...</h2>
       </div>
     );
   }
@@ -107,10 +82,10 @@ export default function CarComparator() {
         
         <header style={{ textAlign: 'center', marginBottom: '35px' }}>
           <h1 style={{ fontSize: '2.2rem', fontWeight: '800', color: '#1e293b' }}>
-            🚘 Live-Auto-Vergleichsportal (API)
+            🚘 Live-Auto-Vergleichsportal
           </h1>
           <p style={{ color: '#64748b' }}>
-            Wählen Sie aus allen weltweit verfügbaren Marken, Modellen und Antriebsarten.
+            Wählen Sie aus den global verfügbaren Herstellern und Modellen.
           </p>
         </header>
 
@@ -125,20 +100,24 @@ export default function CarComparator() {
             <select 
               value={selectedMakeA} 
               onChange={(e) => setSelectedMakeA(e.target.value)}
-              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', marginBottom: '12px' }}
+              style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', marginBottom: '15px', fontSize: '1rem' }}
             >
               {makes.map(m => (
-                <option key={m.make_id} value={m.make_id}>{m.make_display}</option>
+                <option key={m.Make_ID} value={m.Make_Name.toLowerCase()}>{m.Make_Name}</option>
               ))}
             </select>
 
             <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '4px' }}>Modell:</label>
             <select 
-              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+              style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '1rem' }}
             >
-              {modelsA.map(m => (
-                <option key={m.model_name} value={m.model_name}>{m.model_name}</option>
-              ))}
+              {modelsA.length > 0 ? (
+                modelsA.map(m => (
+                  <option key={m.Model_ID} value={m.Model_Name}>{m.Model_Name}</option>
+                ))
+              ) : (
+                <option>Lade Modelle...</option>
+              )}
             </select>
           </div>
 
@@ -150,20 +129,24 @@ export default function CarComparator() {
             <select 
               value={selectedMakeB} 
               onChange={(e) => setSelectedMakeB(e.target.value)}
-              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', marginBottom: '12px' }}
+              style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', marginBottom: '15px', fontSize: '1rem' }}
             >
               {makes.map(m => (
-                <option key={m.make_id} value={m.make_id}>{m.make_display}</option>
+                <option key={m.Make_ID} value={m.Make_Name.toLowerCase()}>{m.Make_Name}</option>
               ))}
             </select>
 
             <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '4px' }}>Modell:</label>
             <select 
-              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+              style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '1rem' }}
             >
-              {modelsB.map(m => (
-                <option key={m.model_name} value={m.model_name}>{m.model_name}</option>
-              ))}
+              {modelsB.length > 0 ? (
+                modelsB.map(m => (
+                  <option key={m.Model_ID} value={m.Model_Name}>{m.Model_Name}</option>
+                ))
+              ) : (
+                <option>Lade Modelle...</option>
+              )}
             </select>
           </div>
 
