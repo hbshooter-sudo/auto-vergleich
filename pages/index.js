@@ -1,149 +1,203 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useId } from 'react';
 import Head from 'next/head';
 import { createClient } from '@supabase/supabase-js';
 
-export default function CarSizedPro() {
-  const [cars, setCars] = useState([]);
-  const [carA, setCarA] = useState(null);
-  const [carB, setCarB] = useState(null);
-  const [loading, setLoading] = useState(true);
+// ============================================================
+// KONFIGURATION
+// ============================================================
+// Supabase-Zugangsdaten idealerweise über Umgebungsvariablen
+// (NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY)
+// statt hart codiert einbinden. Fallback auf die bisherigen
+// Werte, falls keine ENV-Variablen gesetzt sind.
+const SUPABASE_URL =
+  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://gcqcmqcptwvzhuivfbvi.supabase.co';
+const SUPABASE_KEY =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_-PtrOK_5RmXee4XxrZb4CA_FEQ1E1Ak';
 
-  // KI-Kaufberater States
-  const [userQuery, setUserQuery] = useState('');
-  const [recommendations, setRecommendations] = useState([]);
+// Referenzwerte für die Balkendiagramme (Maximalwerte der Skala).
+// Diese Werte bestimmen nur die Skalierung der Balken, keine Fahrzeugdaten.
+const MAX_LENGTH_MM = 5200;
+const MAX_BOOT_LITERS = 800;
 
-  // Supabase-Datenbank beim Start laden
-  useEffect(() => {
-    async function fetchCars() {
-      const url = 'https://gcqcmqcptwvzhuivfbvi.supabase.co';
-      const key = 'sb_publishable_-PtrOK_5RmXee4XxrZb4CA_FEQ1E1Ak';
+const SEARCH_PRESETS = [
+  { label: '⛽ Diesel (< 20k €)', query: 'Sparsamer Diesel unter 20000 €' },
+  { label: '👨‍👩‍👧‍👦 Familienkombi (> 450L)', query: 'Familienkombi mit großem Kofferraum' },
+  { label: '⚡ Elektro-Stadtauto', query: 'Elektroauto für die Stadt' },
+  { label: '⭐ Günstiger Unterhalt', query: 'Günstige Versicherung und niedrige Servicekosten' },
+];
 
-      if (!url || !key) {
-        setLoading(false);
-        return;
-      }
+// ============================================================
+// KOSTEN-RICHTWERTE (Fallback, keine exakten Modelldaten!)
+// ============================================================
+// WICHTIG: Es gibt keine verlässliche "eine Durchschnittszahl pro
+// Fahrzeugklasse" für Versicherung/Wartung in Deutschland – der GDV
+// stuft ca. 33.000 Einzelmodelle individuell in Typklassen ein, und
+// öffentlich verfügbare "Durchschnittswerte" schwanken je nach Quelle
+// um mehrere hundert Prozent (z. B. Wartung Mittelklasse: je nach
+// Quelle zwischen ca. 250 € und 1.750 €/Jahr).
+//
+// Diese Tabelle liefert daher bewusst BANDBREITEN (min–max) auf Basis
+// mehrerer Quellen (ADAC, GDV-Berichterstattung, Fachartikel 2026) und
+// wird NUR als Schätzung angezeigt, wenn ein Fahrzeug in Supabase noch
+// keine eigenen insurance_per_year / maintenance_per_year Werte hat.
+// Sobald echte Werte in der Datenbank stehen, haben diese immer Vorrang.
+//
+// Quellen (Stand: Recherche Juli 2026):
+// - ADAC: Kleinwagen-Wartung ca. 300–500 €/Jahr
+// - VW Golf (Kompaktklasse) Haftpflicht ab ca. 280 €/Jahr, Vollkasko ab ca. 440 €/Jahr
+// - Mehrere Fachquellen: Elektrofahrzeuge ca. 30–40 % niedrigere Wartungskosten
+//   als vergleichbare Verbrenner derselben Klasse
+// - GDV: Typklassen sind modellspezifisch, keine pauschale Klassen-Zahl
+const COST_ESTIMATES_BY_CLASS = {
+  kleinwagen: { insurance: [250, 450], maintenance: [300, 500] },
+  kompaktklasse: { insurance: [350, 600], maintenance: [400, 700] },
+  mittelklasse: { insurance: [500, 900], maintenance: [600, 1000] },
+  suv_oberklasse: { insurance: [600, 1250], maintenance: [800, 1300] },
+};
 
-      const supabase = createClient(url, key);
-      const { data, error } = await supabase.from('cars').select('*');
+const ELEKTRO_MAINTENANCE_DISCOUNT = 0.35; // Mittelwert aus 30–40 % laut Quellen
 
-      if (!error && data && data.length > 0) {
-        setCars(data);
-        setCarA(data[0]);
-        setCarB(data[1] || data[0]);
-      }
-      setLoading(false);
+function getCostEstimate(car) {
+  const key = (car.vehicle_class || '').toLowerCase();
+  const base = COST_ESTIMATES_BY_CLASS[key];
+  if (!base) return null;
+
+  const isElectric = (car.fuel_type || '').toLowerCase().includes('elektro');
+  const maintenance = isElectric
+    ? base.maintenance.map((v) => Math.round(v * (1 - ELEKTRO_MAINTENANCE_DISCOUNT)))
+    : base.maintenance;
+
+  return { insurance: base.insurance, maintenance };
+}
+
+function formatRange([min, max]) {
+  return `${min.toLocaleString('de-DE')}–${max.toLocaleString('de-DE')} €`;
+}
+
+// ============================================================
+// HILFSFUNKTIONEN (reine Funktionen, außerhalb der Komponente,
+// damit sie nicht bei jedem Render neu erzeugt werden)
+// ============================================================
+
+/**
+ * Versucht, aus einem Suchtext einen Budgetwert in Euro zu extrahieren.
+ * Unterstützt u. a.: "20000", "20.000", "20,000", "20k", "20 000 €", "15,5k"
+ * Gibt null zurück, wenn kein plausibler Betrag gefunden wurde.
+ */
+function parseBudgetFromQuery(query) {
+  const match = query.match(/(\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?)\s*(k|tsd|euro|€)?/i);
+  if (!match) return null;
+
+  let numStr = match[1];
+  const suffix = match[2]?.toLowerCase();
+
+  // Tausendertrennzeichen (Punkt, Komma oder Leerzeichen vor 3 Ziffern) entfernen
+  numStr = numStr.replace(/[.,\s](?=\d{3}(\D|$))/g, '');
+  // verbleibendes Komma als Dezimaltrennzeichen interpretieren
+  numStr = numStr.replace(',', '.');
+
+  let value = parseFloat(numStr);
+  if (isNaN(value)) return null;
+
+  if (suffix === 'k' || suffix === 'tsd') value *= 1000;
+
+  return value;
+}
+
+/**
+ * Bewertet ein einzelnes Fahrzeug gegen eine Freitext-Suchanfrage.
+ * Gibt { score, reasons, excluded } zurück.
+ * excluded=true bedeutet: Fahrzeug passt nicht (z. B. Budget überschritten)
+ * und wird unabhängig vom Score aussortiert.
+ */
+function scoreCarAgainstQuery(car, query) {
+  const q = query.toLowerCase();
+  let score = 0;
+  const reasons = [];
+  let excluded = false;
+
+  const maxBudget = parseBudgetFromQuery(q);
+  if (maxBudget !== null) {
+    const price = car.used_price || car.new_price || 0;
+    if (price > 0 && price <= maxBudget) {
+      score += 5;
+      reasons.push(`Passt ins Budget (${price.toLocaleString('de-DE')} €)`);
+    } else if (price > maxBudget) {
+      excluded = true;
     }
-    fetchCars();
-  }, []);
-
-  // Instant-Suche beim Tippen
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (userQuery.trim()) {
-        executeSearch(userQuery);
-      } else {
-        setRecommendations([]);
-      }
-    }, 250);
-
-    return () => clearTimeout(timer);
-  }, [userQuery, cars]);
-
-  const runAiSearch = (queryText) => {
-    setUserQuery(queryText);
-    executeSearch(queryText);
-  };
-
-  const handleAiSearch = () => {
-    executeSearch(userQuery);
-  };
-
-  const executeSearch = (searchText) => {
-    if (!searchText.trim() || cars.length === 0) return;
-
-    const query = searchText.toLowerCase();
-
-    const scoredCars = cars.map(car => {
-      let score = 0;
-      let reasons = [];
-
-      const budgetMatch = query.match(/(\d+[\d\.]*)\s*(euro|€|k)?/);
-      if (budgetMatch) {
-        let maxBudget = parseFloat(budgetMatch[1].replace('.', ''));
-        if (budgetMatch[2] === 'k') maxBudget *= 1000;
-        
-        const price = car.used_price || car.new_price || 0;
-        if (price > 0 && price <= maxBudget) {
-          score += 5;
-          reasons.push(`Passt ins Budget (${price.toLocaleString()} €)`);
-        } else if (price > maxBudget) {
-          score = -1;
-        }
-      }
-
-      if (query.includes('elektro') || query.includes('strom')) {
-        if (car.fuel_type?.toLowerCase().includes('elektro')) { score += 4; reasons.push('Elektroantrieb'); }
-      }
-      if (query.includes('diesel')) {
-        if (car.fuel_type?.toLowerCase().includes('diesel')) { score += 4; reasons.push('Sparsamer Diesel'); }
-      }
-      if (query.includes('benzin')) {
-        if (car.fuel_type?.toLowerCase().includes('benzin')) { score += 4; reasons.push('Benziner'); }
-      }
-
-      if (query.includes('familie') || query.includes('groß') || query.includes('kofferraum') || query.includes('platz') || query.includes('kombi')) {
-        if ((car.boot_capacity_liters || 0) > 450) { score += 3; reasons.push('Großer Kofferraum'); }
-      }
-
-      if (query.includes('günstig') || query.includes('sparen') || query.includes('niedrig')) {
-        if ((car.insurance_per_year || 0) < 700) { score += 2; reasons.push('Günstige Versicherung'); }
-        if ((car.maintenance_per_year || 0) < 400) { score += 2; reasons.push('Niedrige Servicekosten'); }
-      }
-
-      return { car, score, reasons };
-    });
-
-    const sorted = scoredCars
-      .filter(item => item.score > 0)
-      .sort((a, b) => b.score - a.score);
-
-    setRecommendations(sorted.length > 0 ? sorted : [{ car: cars[0], score: 1, reasons: ['Standard-Empfehlungs-Match'] }]);
-  };
-
-  const getCostStyle = (valA, valB) => {
-    if (!valA || !valB || valA === valB) return { color: '#e2e8f0' };
-    return valA < valB 
-      ? { color: '#34d399', fontWeight: 'bold', background: 'rgba(52, 211, 153, 0.1)', padding: '4px 8px', borderRadius: '6px' } 
-      : { color: '#f87171', background: 'rgba(248, 113, 113, 0.1)', padding: '4px 8px', borderRadius: '6px' };
-  };
-
-  if (loading) {
-    return (
-      <div style={{ padding: '80px 20px', backgroundColor: '#090d16', minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-        <div style={{ maxWidth: '600px', width: '100%', textAlign: 'center' }}>
-          <div style={{ fontSize: '1.2rem', color: '#38bdf8', marginBottom: '20px', fontWeight: '600', letterSpacing: '1px' }}>
-            ⚡ LADE HIGH-TECH FAHRZEUGDATEN...
-          </div>
-          <div style={{ height: '8px', width: '100%', backgroundColor: '#1e293b', borderRadius: '10px', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: '60%', backgroundColor: '#38bdf8', borderRadius: '10px', animation: 'pulse 1.5s infinite' }} />
-          </div>
-        </div>
-      </div>
-    );
   }
 
-  if (!carA || !carB) {
-    return (
-      <div style={{ padding: '60px', textAlign: 'center', fontFamily: 'system-ui, sans-serif', color: '#f8fafc', backgroundColor: '#090d16', minHeight: '100vh' }}>
-        <h2>Keine Autos in der Datenbank gefunden.</h2>
-      </div>
-    );
+  const fuel = car.fuel_type?.toLowerCase() || '';
+  if ((q.includes('elektro') || q.includes('strom')) && fuel.includes('elektro')) {
+    score += 4;
+    reasons.push('Elektroantrieb');
+  }
+  if (q.includes('diesel') && fuel.includes('diesel')) {
+    score += 4;
+    reasons.push('Sparsamer Diesel');
+  }
+  if (q.includes('benzin') && fuel.includes('benzin')) {
+    score += 4;
+    reasons.push('Benziner');
   }
 
-  const getWidthPercent = (lengthMm) => ((lengthMm || 4000) / 5200) * 100;
-  const getBootPercent = (bootLiters) => Math.min(((bootLiters || 0) / 800) * 100, 100);
+  const wantsSpace =
+    q.includes('familie') || q.includes('groß') || q.includes('kofferraum') ||
+    q.includes('platz') || q.includes('kombi');
+  if (wantsSpace && (car.boot_capacity_liters || 0) > 450) {
+    score += 3;
+    reasons.push('Großer Kofferraum');
+  }
 
-  const cardStyle = {
+  const wantsCheap = q.includes('günstig') || q.includes('sparen') || q.includes('niedrig');
+  if (wantsCheap) {
+    const estimate = getCostEstimate(car);
+    // Echte Werte haben Vorrang; fehlen sie, wird der Mittelwert der
+    // Richtwert-Bandbreite als Näherung herangezogen (klar als solche
+    // in der UI gekennzeichnet, siehe CostEstimateRow).
+    const insurance = car.insurance_per_year || (estimate ? (estimate.insurance[0] + estimate.insurance[1]) / 2 : null);
+    const maintenance = car.maintenance_per_year || (estimate ? (estimate.maintenance[0] + estimate.maintenance[1]) / 2 : null);
+
+    if (insurance !== null && insurance < 700) {
+      score += 2;
+      reasons.push('Günstige Versicherung');
+    }
+    if (maintenance !== null && maintenance < 400) {
+      score += 2;
+      reasons.push('Niedrige Servicekosten');
+    }
+  }
+
+  return { score, reasons, excluded };
+}
+
+function getWidthPercent(lengthMm) {
+  return Math.min(((lengthMm || 0) / MAX_LENGTH_MM) * 100, 100);
+}
+
+function getBootPercent(bootLiters) {
+  return Math.min(((bootLiters || 0) / MAX_BOOT_LITERS) * 100, 100);
+}
+
+function formatEuro(value) {
+  return typeof value === 'number' ? `${value.toLocaleString('de-DE')} €` : '–';
+}
+
+// ============================================================
+// STYLES (zentral gesammelt statt pro Render neu erzeugt)
+// ============================================================
+
+const styles = {
+  page: {
+    fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    backgroundColor: '#090d16',
+    color: '#f8fafc',
+    minHeight: '100vh',
+    padding: '40px 20px 100px 20px',
+    backgroundImage: 'radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.12) 0%, transparent 50%)',
+  },
+  container: { maxWidth: '1080px', margin: '0 auto' },
+  card: {
     background: 'rgba(26, 34, 52, 0.65)',
     backdropFilter: 'blur(16px)',
     WebkitBackdropFilter: 'blur(16px)',
@@ -151,10 +205,9 @@ export default function CarSizedPro() {
     borderRadius: '24px',
     padding: '28px',
     marginBottom: '32px',
-    boxShadow: '0 20px 40px rgba(0, 0, 0, 0.35)'
-  };
-
-  const chipStyle = {
+    boxShadow: '0 20px 40px rgba(0, 0, 0, 0.35)',
+  },
+  chip: {
     background: 'rgba(15, 23, 42, 0.8)',
     color: '#cbd5e1',
     border: '1px solid rgba(56, 189, 248, 0.2)',
@@ -164,20 +217,271 @@ export default function CarSizedPro() {
     fontSize: '0.85rem',
     fontWeight: '500',
     transition: 'all 0.2s ease',
-    backdropFilter: 'blur(8px)'
+    backdropFilter: 'blur(8px)',
+  },
+  label: {
+    fontSize: '0.8rem',
+    color: '#94a3b8',
+    fontWeight: '600',
+    letterSpacing: '0.5px',
+  },
+  select: {
+    width: '100%',
+    padding: '12px 16px',
+    borderRadius: '12px',
+    background: 'rgba(15, 23, 42, 0.8)',
+    color: '#fff',
+    border: '1px solid rgba(255, 255, 255, 0.12)',
+    marginTop: '6px',
+    outline: 'none',
+  },
+  metricBox: {
+    background: 'rgba(15, 23, 42, 0.5)',
+    padding: '20px',
+    borderRadius: '16px',
+    marginBottom: '16px',
+    border: '1px solid rgba(255, 255, 255, 0.05)',
+  },
+  visuallyHidden: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    border: 0,
+  },
+};
+
+function getCostStyle(valA, valB) {
+  if (!valA || !valB || valA === valB) return { color: '#e2e8f0' };
+  return valA < valB
+    ? { color: '#34d399', fontWeight: 'bold', background: 'rgba(52, 211, 153, 0.1)', padding: '4px 8px', borderRadius: '6px' }
+    : { color: '#f87171', background: 'rgba(248, 113, 113, 0.1)', padding: '4px 8px', borderRadius: '6px' };
+}
+
+// ============================================================
+// WIEDERVERWENDBARE UNTERKOMPONENTEN
+// ============================================================
+
+function CarSelect({ id, labelText, value, cars, onChange }) {
+  return (
+    <div>
+      <label htmlFor={id} style={styles.label}>{labelText}</label>
+      <select
+        id={id}
+        value={value}
+        onChange={onChange}
+        style={styles.select}
+      >
+        {cars.map((c) => (
+          <option key={c.id} value={c.id}>{c.brand} {c.model} ({c.year})</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function ComparisonBar({ title, carA, carB, valueKey, unit, getPercent }) {
+  return (
+    <div style={styles.metricBox}>
+      <h4 style={{ margin: '0 0 12px 0', color: '#94a3b8', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
+        {title}
+      </h4>
+      <div style={{ marginBottom: '12px' }}>
+        <div style={{ fontSize: '0.85rem', marginBottom: '6px', color: '#e2e8f0' }}>
+          {carA.brand} {carA.model}: {carA[valueKey] || 0} {unit}
+        </div>
+        <div
+          role="img"
+          aria-label={`${carA.brand} ${carA.model}: ${carA[valueKey] || 0} ${unit}`}
+          style={{ width: `${getPercent(carA[valueKey])}%`, height: '28px', background: 'linear-gradient(90deg, #0284c7 0%, #38bdf8 100%)', borderRadius: '8px', transition: 'width 0.4s ease' }}
+        />
+      </div>
+      <div>
+        <div style={{ fontSize: '0.85rem', marginBottom: '6px', color: '#e2e8f0' }}>
+          {carB.brand} {carB.model}: {carB[valueKey] || 0} {unit}
+        </div>
+        <div
+          role="img"
+          aria-label={`${carB.brand} ${carB.model}: ${carB[valueKey] || 0} ${unit}`}
+          style={{ width: `${getPercent(carB[valueKey])}%`, height: '28px', background: 'linear-gradient(90deg, #e11d48 0%, #fb7185 100%)', borderRadius: '8px', transition: 'width 0.4s ease' }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function CostRow({ label, carA, carB, field, formatter, highlightCheaper }) {
+  const valA = carA[field];
+  const valB = carB[field];
+  const styleA = highlightCheaper ? getCostStyle(valA, valB) : {};
+  const styleB = highlightCheaper ? getCostStyle(valB, valA) : {};
+  return (
+    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+      <td style={{ padding: '14px 12px', color: '#94a3b8' }}>{label}</td>
+      <td style={{ padding: '14px 12px' }}><span style={styleA}>{formatter ? formatter(valA) : (valA || 'k. A.')}</span></td>
+      <td style={{ padding: '14px 12px' }}><span style={styleB}>{formatter ? formatter(valB) : (valB || 'k. A.')}</span></td>
+    </tr>
+  );
+}
+
+/**
+ * Zeigt Versicherung/Wartung an. Wenn das Fahrzeug echte Werte in
+ * Supabase hat, werden diese exakt angezeigt (grün/rot markiert im
+ * Vergleich). Fehlen echte Werte, wird stattdessen eine als solche
+ * gekennzeichnete Bandbreite (Richtwert) angezeigt – niemals eine
+ * erfundene Einzelzahl.
+ */
+function CostEstimateRow({ label, carA, carB, field }) {
+  const estA = getCostEstimate(carA);
+  const estB = getCostEstimate(carB);
+
+  const rawA = carA[field];
+  const rawB = carB[field];
+
+  const renderCell = (rawVal, estimate) => {
+    if (typeof rawVal === 'number' && rawVal > 0) {
+      return <span>~{formatEuro(rawVal)}</span>;
+    }
+    if (estimate) {
+      return (
+        <span title="Bundesweiter Richtwert nach Fahrzeugklasse, keine modellspezifische Angabe">
+          {formatRange(estimate[field === 'insurance_per_year' ? 'insurance' : 'maintenance'])}{' '}
+          <em style={{ color: '#64748b', fontStyle: 'normal', fontSize: '0.75rem' }}>(Ø Richtwert)</em>
+        </span>
+      );
+    }
+    return <span>k. A.</span>;
   };
 
-  return (
-    <div style={{ fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', backgroundColor: '#090d16', color: '#f8fafc', minHeight: '100vh', padding: '40px 20px 100px 20px', backgroundImage: 'radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.12) 0%, transparent 50%)' }}>
-      
-      {/* 1. VERSTECKTER ENTWICKLER-NACHWEIS IM HTML-CODE */}
-      {/* 
-        ====================================================
-        DEVELOPED AND ARCHITECTED BY RENE BERLIPS (2026)
-        ALL RIGHTS RESERVED - AUTOBERATER PLATFORM
-        ====================================================
-      */}
+  const canHighlight = typeof rawA === 'number' && rawA > 0 && typeof rawB === 'number' && rawB > 0;
+  const styleA = canHighlight ? getCostStyle(rawA, rawB) : {};
+  const styleB = canHighlight ? getCostStyle(rawB, rawA) : {};
 
+  return (
+    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+      <td style={{ padding: '14px 12px', color: '#94a3b8' }}>{label}</td>
+      <td style={{ padding: '14px 12px' }}><span style={styleA}>{renderCell(rawA, estA)}</span></td>
+      <td style={{ padding: '14px 12px' }}><span style={styleB}>{renderCell(rawB, estB)}</span></td>
+    </tr>
+  );
+}
+
+// ============================================================
+// HAUPTKOMPONENTE
+// ============================================================
+
+export default function CarSizedPro() {
+  const [cars, setCars] = useState([]);
+  const [carAId, setCarAId] = useState(null);
+  const [carBId, setCarBId] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+
+  const [userQuery, setUserQuery] = useState('');
+
+  const selectAId = useId();
+  const selectBId = useId();
+
+  // Fahrzeuge aus Supabase laden
+  useEffect(() => {
+    let isMounted = true;
+
+    async function fetchCars() {
+      if (!SUPABASE_URL || !SUPABASE_KEY) {
+        setLoadError('Keine Supabase-Konfiguration gefunden.');
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+        const { data, error } = await supabase.from('cars').select('*');
+
+        if (!isMounted) return;
+
+        if (error) {
+          console.error('Supabase-Fehler beim Laden der Fahrzeuge:', error);
+          setLoadError('Die Fahrzeugdaten konnten nicht geladen werden. Bitte später erneut versuchen.');
+        } else if (data && data.length > 0) {
+          setCars(data);
+          setCarAId(data[0].id);
+          setCarBId(data.length > 1 ? data[1].id : data[0].id);
+        }
+      } catch (err) {
+        if (!isMounted) return;
+        console.error('Unerwarteter Fehler beim Laden der Fahrzeuge:', err);
+        setLoadError('Die Fahrzeugdaten konnten nicht geladen werden. Bitte später erneut versuchen.');
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+
+    fetchCars();
+    return () => { isMounted = false; };
+  }, []);
+
+  const carA = useMemo(() => cars.find((c) => c.id === carAId) || null, [cars, carAId]);
+  const carB = useMemo(() => cars.find((c) => c.id === carBId) || null, [cars, carBId]);
+
+  // Suchergebnisse berechnen (memoized, kein separater State + Debounce-Timer nötig)
+  const recommendations = useMemo(() => {
+    const trimmed = userQuery.trim();
+    if (!trimmed || cars.length === 0) return [];
+
+    const scored = cars
+      .map((car) => ({ car, ...scoreCarAgainstQuery(car, trimmed) }))
+      .filter((item) => !item.excluded && item.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    if (scored.length > 0) return scored;
+
+    return [{ car: cars[0], score: 0, reasons: ['Keine exakte Übereinstimmung – Standardvorschlag'] }];
+  }, [userQuery, cars]);
+
+  const runPresetSearch = useCallback((queryText) => {
+    setUserQuery(queryText);
+  }, []);
+
+  if (loading) {
+    return (
+      <div style={{ padding: '80px 20px', backgroundColor: '#090d16', minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+        <div style={{ maxWidth: '600px', width: '100%', textAlign: 'center' }}>
+          <div style={{ fontSize: '1.2rem', color: '#38bdf8', marginBottom: '20px', fontWeight: '600', letterSpacing: '1px' }}>
+            ⚡ LADE FAHRZEUGDATEN...
+          </div>
+          <div style={{ height: '8px', width: '100%', backgroundColor: '#1e293b', borderRadius: '10px', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: '60%', backgroundColor: '#38bdf8', borderRadius: '10px', animation: 'pulse 1.5s infinite' }} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div style={{ padding: '60px', textAlign: 'center', fontFamily: 'system-ui, sans-serif', color: '#f8fafc', backgroundColor: '#090d16', minHeight: '100vh' }}>
+        <h2>{loadError}</h2>
+      </div>
+    );
+  }
+
+  if (!carA || !carB) {
+    return (
+      <div style={{ padding: '60px', textAlign: 'center', fontFamily: 'system-ui, sans-serif', color: '#f8fafc', backgroundColor: '#090d16', minHeight: '100vh' }}>
+        <h2>Keine Autos in der Datenbank gefunden.</h2>
+        <p style={{ color: '#94a3b8' }}>Füge Fahrzeuge zur Supabase-Tabelle „cars" hinzu, um den Vergleich zu starten.</p>
+      </div>
+    );
+  }
+
+  const sameCarSelected = carA.id === carB.id && cars.length === 1;
+
+  return (
+    <div style={styles.page}>
       <Head>
         <title>CarSized Pro | AI Vehicle Analytics & Comparison</title>
         <meta name="author" content="Rene Berlips" />
@@ -186,12 +490,17 @@ export default function CarSizedPro() {
         <meta property="og:description" content="Next-Gen Vergleichsplattform für Fahrzeugdimensionen und Unterhaltskosten." />
       </Head>
 
-      <div style={{ maxWidth: '1080px', margin: '0 auto' }}>
-        
-        {/* Modern Header */}
+      {/* Sichtbar für Screenreader/Quellcode-Leser, aber optisch ausgeblendet.
+          Anders als ein JSX-Kommentar landet dieser Text tatsächlich im
+          gerenderten HTML-DOM. */}
+      <span style={styles.visuallyHidden}>
+        Developed and architected by Rene Berlips (2026) – AutoBerater Platform. All rights reserved.
+      </span>
+
+      <div style={styles.container}>
         <header style={{ textAlign: 'center', marginBottom: '50px' }}>
           <div style={{ display: 'inline-block', padding: '6px 16px', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '20px', color: '#38bdf8', fontSize: '0.8rem', fontWeight: '700', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '16px' }}>
-            AI-POWERED PLATFORM 2026
+            PLATTFORM 2026
           </div>
           <h1 style={{ fontSize: '3rem', fontWeight: '900', letterSpacing: '-1px', background: 'linear-gradient(135deg, #ffffff 0%, #38bdf8 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: '0 0 12px 0' }}>
             CARSIZED PRO
@@ -201,24 +510,32 @@ export default function CarSizedPro() {
           </p>
         </header>
 
-        {/* 1. SEKTION: KI-BERATER */}
-        <section style={cardStyle}>
+        {/* SUCHE */}
+        <section style={styles.card}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
             <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#38bdf8', boxShadow: '0 0 12px #38bdf8' }} />
-            <h2 style={{ fontSize: '1.3rem', fontWeight: '700', margin: 0, color: '#fff' }}>Smart Search Engine</h2>
+            <h2 style={{ fontSize: '1.3rem', fontWeight: '700', margin: 0, color: '#fff' }}>Smart Search</h2>
           </div>
 
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '20px' }}>
-            <button onClick={() => runAiSearch('Sparsamer Diesel unter 20000 €')} style={chipStyle}>⛽ Diesel (&lt; 20k €)</button>
-            <button onClick={() => runAiSearch('Familienkombi mit großem Kofferraum')} style={chipStyle}>👨‍👩‍👧‍👦 Familienkombi (&gt; 450L)</button>
-            <button onClick={() => runAiSearch('Elektroauto für die Stadt')} style={chipStyle}>⚡ Elektro-Stadtauto</button>
-            <button onClick={() => runAiSearch('Günstige Versicherung und niedrige Servicekosten')} style={chipStyle}>⭐ Günstiger Unterhalt</button>
+            {SEARCH_PRESETS.map((preset) => (
+              <button
+                key={preset.label}
+                onClick={() => runPresetSearch(preset.query)}
+                style={styles.chip}
+                aria-label={`Suche starten: ${preset.query}`}
+              >
+                {preset.label}
+              </button>
+            ))}
           </div>
 
           <div style={{ position: 'relative', marginBottom: '24px' }}>
-            <input 
-              type="text" 
-              placeholder="Suchen Sie z. B. nach 'Elektro 30000 €' oder 'Sparsamer Kombi'..." 
+            <label htmlFor="car-search-input" style={styles.visuallyHidden}>Fahrzeugsuche</label>
+            <input
+              id="car-search-input"
+              type="text"
+              placeholder="Suchen Sie z. B. nach 'Elektro 30000 €' oder 'Sparsamer Kombi'..."
               value={userQuery}
               onChange={(e) => setUserQuery(e.target.value)}
               style={{ width: '100%', padding: '18px 20px', borderRadius: '16px', border: '1px solid rgba(255, 255, 255, 0.12)', background: 'rgba(15, 23, 42, 0.6)', color: '#fff', fontSize: '1rem', outline: 'none', boxSizing: 'border-box' }}
@@ -228,10 +545,14 @@ export default function CarSizedPro() {
           {recommendations.length > 0 && (
             <div style={{ display: 'grid', gap: '12px' }}>
               {recommendations.map(({ car, reasons }, idx) => (
-                <div key={car.id || idx} style={{ background: 'rgba(15, 23, 42, 0.7)', padding: '16px 20px', borderRadius: '14px', borderLeft: '4px solid #34d399', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h3 style={{ margin: 0, color: '#34d399', fontSize: '1.05rem', fontWeight: '700' }}>#{idx + 1} Top Match: {car.brand} {car.model}</h3>
-                    <span style={{ fontSize: '0.9rem', color: '#94a3b8', fontWeight: '600' }}>~{(car.used_price || car.new_price || 0).toLocaleString()} €</span>
+                <div key={car.id ?? idx} style={{ background: 'rgba(15, 23, 42, 0.7)', padding: '16px 20px', borderRadius: '14px', borderLeft: '4px solid #34d399', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                    <h3 style={{ margin: 0, color: '#34d399', fontSize: '1.05rem', fontWeight: '700' }}>
+                      #{idx + 1} {car.brand} {car.model}
+                    </h3>
+                    <span style={{ fontSize: '0.9rem', color: '#94a3b8', fontWeight: '600' }}>
+                      ~{formatEuro(car.used_price || car.new_price || 0)}
+                    </span>
                   </div>
                   <div style={{ marginTop: '6px', fontSize: '0.88rem', color: '#cbd5e1' }}>
                     <strong>Kriterien:</strong> {reasons.join(' • ')}
@@ -242,112 +563,90 @@ export default function CarSizedPro() {
           )}
         </section>
 
-        {/* 2. SEKTION: VISUELLER VERGLEICH */}
-        <section style={cardStyle}>
+        {/* DIMENSIONEN */}
+        <section style={styles.card}>
           <h2 style={{ fontSize: '1.3rem', fontWeight: '700', margin: '0 0 20px 0', color: '#fff' }}>Dimensionen & Volumen</h2>
-          
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', marginBottom: '24px' }}>
-            <div>
-              <label style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: '600', letterSpacing: '0.5px' }}>FAHRZEUG 1</label>
-              <select 
-                value={carA.id} 
-                onChange={(e) => setCarA(cars.find(c => c.id === e.target.value))}
-                style={{ width: '100%', padding: '12px 16px', borderRadius: '12px', background: 'rgba(15, 23, 42, 0.8)', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.12)', marginTop: '6px', outline: 'none' }}
-              >
-                {cars.map(c => <option key={c.id} value={c.id}>{c.brand} {c.model} ({c.year})</option>)}
-              </select>
-            </div>
-
-            <div>
-              <label style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: '600', letterSpacing: '0.5px' }}>FAHRZEUG 2</label>
-              <select 
-                value={carB.id} 
-                onChange={(e) => setCarB(cars.find(c => c.id === e.target.value))}
-                style={{ width: '100%', padding: '12px 16px', borderRadius: '12px', background: 'rgba(15, 23, 42, 0.8)', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.12)', marginTop: '6px', outline: 'none' }}
-              >
-                {cars.map(c => <option key={c.id} value={c.id}>{c.brand} {c.model} ({c.year})</option>)}
-              </select>
-            </div>
+            <CarSelect
+              id={selectAId}
+              labelText="FAHRZEUG 1"
+              value={carA.id}
+              cars={cars}
+              onChange={(e) => setCarAId(e.target.value)}
+            />
+            <CarSelect
+              id={selectBId}
+              labelText="FAHRZEUG 2"
+              value={carB.id}
+              cars={cars}
+              onChange={(e) => setCarBId(e.target.value)}
+            />
           </div>
 
-          <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '20px', borderRadius: '16px', marginBottom: '16px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
-            <h4 style={{ margin: '0 0 12px 0', color: '#94a3b8', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Gesamtlänge (mm)</h4>
-            <div style={{ marginBottom: '12px' }}>
-              <div style={{ fontSize: '0.85rem', marginBottom: '6px', color: '#e2e8f0' }}>{carA.brand} {carA.model}: {carA.length_mm || 0} mm</div>
-              <div style={{ width: `${getWidthPercent(carA.length_mm)}%`, height: '28px', background: 'linear-gradient(90deg, #0284c7 0%, #38bdf8 100%)', borderRadius: '8px', transition: 'width 0.4s ease' }} />
-            </div>
-            <div>
-              <div style={{ fontSize: '0.85rem', marginBottom: '6px', color: '#e2e8f0' }}>{carB.brand} {carB.model}: {carB.length_mm || 0} mm</div>
-              <div style={{ width: `${getWidthPercent(carB.length_mm)}%`, height: '28px', background: 'linear-gradient(90deg, #e11d48 0%, #fb7185 100%)', borderRadius: '8px', transition: 'width 0.4s ease' }} />
-            </div>
-          </div>
+          {sameCarSelected && (
+            <p style={{ color: '#fbbf24', fontSize: '0.85rem', marginTop: '-12px', marginBottom: '20px' }}>
+              Es befindet sich nur ein Fahrzeug in der Datenbank – der Vergleich zeigt daher zweimal dasselbe Auto.
+            </p>
+          )}
 
-          <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '20px', borderRadius: '16px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
-            <h4 style={{ margin: '0 0 12px 0', color: '#94a3b8', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Kofferraumvolumen (L)</h4>
-            <div style={{ marginBottom: '12px' }}>
-              <div style={{ fontSize: '0.85rem', marginBottom: '6px', color: '#e2e8f0' }}>{carA.brand} {carA.model}: {carA.boot_capacity_liters || 0} L</div>
-              <div style={{ width: `${getBootPercent(carA.boot_capacity_liters)}%`, height: '28px', background: 'linear-gradient(90deg, #059669 0%, #34d399 100%)', borderRadius: '8px', transition: 'width 0.4s ease' }} />
-            </div>
-            <div>
-              <div style={{ fontSize: '0.85rem', marginBottom: '6px', color: '#e2e8f0' }}>{carB.brand} {carB.model}: {carB.boot_capacity_liters || 0} L</div>
-              <div style={{ width: `${getBootPercent(carB.boot_capacity_liters)}%`, height: '28px', background: 'linear-gradient(90deg, #d97706 0%, #fbbf24 100%)', borderRadius: '8px', transition: 'width 0.4s ease' }} />
-            </div>
-          </div>
+          <ComparisonBar
+            title="Gesamtlänge (mm)"
+            carA={carA}
+            carB={carB}
+            valueKey="length_mm"
+            unit="mm"
+            getPercent={getWidthPercent}
+          />
+          <ComparisonBar
+            title="Kofferraumvolumen (L)"
+            carA={carA}
+            carB={carB}
+            valueKey="boot_capacity_liters"
+            unit="L"
+            getPercent={getBootPercent}
+          />
         </section>
 
-        {/* 3. SEKTION: KOSTENVERGLEICH */}
-        <section style={cardStyle}>
+        {/* KOSTEN */}
+        <section style={styles.card}>
           <h2 style={{ fontSize: '1.3rem', fontWeight: '700', margin: '0 0 20px 0', color: '#fff' }}>Betriebskosten & Kennzahlen</h2>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '500px' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#94a3b8', fontSize: '0.85rem' }}>
-                  <th style={{ padding: '12px' }}>KRITERIUM</th>
-                  <th style={{ padding: '12px', color: '#38bdf8' }}>{carA.brand} {carA.model}</th>
-                  <th style={{ padding: '12px', color: '#fb7185' }}>{carB.brand} {carB.model}</th>
+                  <th style={{ padding: '12px' }} scope="col">KRITERIUM</th>
+                  <th style={{ padding: '12px', color: '#38bdf8' }} scope="col">{carA.brand} {carA.model}</th>
+                  <th style={{ padding: '12px', color: '#fb7185' }} scope="col">{carB.brand} {carB.model}</th>
                 </tr>
               </thead>
               <tbody style={{ fontSize: '0.9rem' }}>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                  <td style={{ padding: '14px 12px', color: '#94a3b8' }}>Antriebsart</td>
-                  <td style={{ padding: '14px 12px' }}>{carA.fuel_type || 'k. A.'}</td>
-                  <td style={{ padding: '14px 12px' }}>{carB.fuel_type || 'k. A.'}</td>
-                </tr>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                  <td style={{ padding: '14px 12px', color: '#94a3b8' }}>Gebrauchtwagenpreis</td>
-                  <td style={{ padding: '14px 12px' }}>{carA.used_price ? `${carA.used_price.toLocaleString()} €` : '-'}</td>
-                  <td style={{ padding: '14px 12px' }}>{carB.used_price ? `${carB.used_price.toLocaleString()} €` : '-'}</td>
-                </tr>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                  <td style={{ padding: '14px 12px', color: '#94a3b8' }}>Versicherung / Jahr</td>
-                  <td style={{ padding: '14px 12px' }}><span style={getCostStyle(carA.insurance_per_year, carB.insurance_per_year)}>~{carA.insurance_per_year || 0} €</span></td>
-                  <td style={{ padding: '14px 12px' }}><span style={getCostStyle(carB.insurance_per_year, carA.insurance_per_year)}>~{carB.insurance_per_year || 0} €</span></td>
-                </tr>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                  <td style={{ padding: '14px 12px', color: '#94a3b8' }}>Service & Wartung / Jahr</td>
-                  <td style={{ padding: '14px 12px' }}><span style={getCostStyle(carA.maintenance_per_year, carB.maintenance_per_year)}>~{carA.maintenance_per_year || 0} €</span></td>
-                  <td style={{ padding: '14px 12px' }}><span style={getCostStyle(carB.maintenance_per_year, carA.maintenance_per_year)}>~{carB.maintenance_per_year || 0} €</span></td>
-                </tr>
+                <CostRow label="Antriebsart" carA={carA} carB={carB} field="fuel_type" />
+                <CostRow label="Gebrauchtwagenpreis" carA={carA} carB={carB} field="used_price" formatter={formatEuro} />
+                <CostEstimateRow label="Versicherung / Jahr" carA={carA} carB={carB} field="insurance_per_year" />
+                <CostEstimateRow label="Service & Wartung / Jahr" carA={carA} carB={carB} field="maintenance_per_year" />
               </tbody>
             </table>
           </div>
+          <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '14px', lineHeight: 1.5 }}>
+            <strong>Ø Richtwert</strong> = bundesweite Schätzung nach Fahrzeugklasse (ADAC/Fachquellen 2026),
+            keine modellspezifische Angabe. Trage echte Werte in die Supabase-Tabelle ein
+            (Feld <code>vehicle_class</code>: „kleinwagen", „kompaktklasse", „mittelklasse" oder „suv_oberklasse"),
+            damit hier zuverlässige, für dein Fahrzeug spezifische Zahlen statt Richtwerte erscheinen.
+          </p>
         </section>
 
-        {/* FOOTER MIT URHEBER-NACHWEIS */}
         <footer style={{ textAlign: 'center', color: '#64748b', fontSize: '0.85rem', marginTop: '40px' }}>
           <p>© 2026 CarSized Pro • Designed & Developed by <strong style={{ color: '#38bdf8' }}>Rene Berlips</strong></p>
         </footer>
-
       </div>
 
-      {/* STICKY BOTTOM BAR */}
-      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: 'rgba(9, 13, 22, 0.9)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', borderTop: '1px solid rgba(255, 255, 255, 0.1)', padding: '12px 20px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px', zIndex: 100 }}>
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: 'rgba(9, 13, 22, 0.9)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', borderTop: '1px solid rgba(255, 255, 255, 0.1)', padding: '12px 20px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px', zIndex: 100, flexWrap: 'wrap' }}>
         <span style={{ fontSize: '0.8rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px' }}>Vergleich:</span>
         <span style={{ fontWeight: '700', color: '#38bdf8', fontSize: '0.9rem' }}>{carA.brand} {carA.model}</span>
         <span style={{ color: '#475569', fontSize: '0.8rem' }}>VS</span>
         <span style={{ fontWeight: '700', color: '#fb7185', fontSize: '0.9rem' }}>{carB.brand} {carB.model}</span>
       </div>
-
     </div>
   );
 }
