@@ -1,21 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback, useId } from 'react';
 import Head from 'next/head';
-import { createClient } from '@supabase/supabase-js';
-
-// ============================================================
-// KONFIGURATION
-// ============================================================
-// Supabase-Zugangsdaten idealerweise über Umgebungsvariablen
-// (NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY)
-// statt hart codiert einbinden. Fallback auf die bisherigen
-// Werte, falls keine ENV-Variablen gesetzt sind.
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://gcqcmqcptwvzhuivfbvi.supabase.co';
-const SUPABASE_KEY =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_-PtrOK_5RmXee4XxrZb4CA_FEQ1E1Ak';
+import { supabase } from '../lib/supabaseClient';
 
 // Referenzwerte für die Balkendiagramme (Maximalwerte der Skala).
-// Diese Werte bestimmen nur die Skalierung der Balken, keine Fahrzeugdaten.
 const MAX_LENGTH_MM = 5200;
 const MAX_BOOT_LITERS = 800;
 
@@ -26,28 +13,6 @@ const SEARCH_PRESETS = [
   { label: '⭐ Günstiger Unterhalt', query: 'Günstige Versicherung und niedrige Servicekosten' },
 ];
 
-// ============================================================
-// KOSTEN-RICHTWERTE (Fallback, keine exakten Modelldaten!)
-// ============================================================
-// WICHTIG: Es gibt keine verlässliche "eine Durchschnittszahl pro
-// Fahrzeugklasse" für Versicherung/Wartung in Deutschland – der GDV
-// stuft ca. 33.000 Einzelmodelle individuell in Typklassen ein, und
-// öffentlich verfügbare "Durchschnittswerte" schwanken je nach Quelle
-// um mehrere hundert Prozent (z. B. Wartung Mittelklasse: je nach
-// Quelle zwischen ca. 250 € und 1.750 €/Jahr).
-//
-// Diese Tabelle liefert daher bewusst BANDBREITEN (min–max) auf Basis
-// mehrerer Quellen (ADAC, GDV-Berichterstattung, Fachartikel 2026) und
-// wird NUR als Schätzung angezeigt, wenn ein Fahrzeug in Supabase noch
-// keine eigenen insurance_per_year / maintenance_per_year Werte hat.
-// Sobald echte Werte in der Datenbank stehen, haben diese immer Vorrang.
-//
-// Quellen (Stand: Recherche Juli 2026):
-// - ADAC: Kleinwagen-Wartung ca. 300–500 €/Jahr
-// - VW Golf (Kompaktklasse) Haftpflicht ab ca. 280 €/Jahr, Vollkasko ab ca. 440 €/Jahr
-// - Mehrere Fachquellen: Elektrofahrzeuge ca. 30–40 % niedrigere Wartungskosten
-//   als vergleichbare Verbrenner derselben Klasse
-// - GDV: Typklassen sind modellspezifisch, keine pauschale Klassen-Zahl
 const COST_ESTIMATES_BY_CLASS = {
   kleinwagen: { insurance: [250, 450], maintenance: [300, 500] },
   kompaktklasse: { insurance: [350, 600], maintenance: [400, 700] },
@@ -55,7 +20,7 @@ const COST_ESTIMATES_BY_CLASS = {
   suv_oberklasse: { insurance: [600, 1250], maintenance: [800, 1300] },
 };
 
-const ELEKTRO_MAINTENANCE_DISCOUNT = 0.35; // Mittelwert aus 30–40 % laut Quellen
+const ELEKTRO_MAINTENANCE_DISCOUNT = 0.35;
 
 function getCostEstimate(car) {
   const key = (car.vehicle_class || '').toLowerCase();
@@ -74,16 +39,6 @@ function formatRange([min, max]) {
   return `${min.toLocaleString('de-DE')}–${max.toLocaleString('de-DE')} €`;
 }
 
-// ============================================================
-// HILFSFUNKTIONEN (reine Funktionen, außerhalb der Komponente,
-// damit sie nicht bei jedem Render neu erzeugt werden)
-// ============================================================
-
-/**
- * Versucht, aus einem Suchtext einen Budgetwert in Euro zu extrahieren.
- * Unterstützt u. a.: "20000", "20.000", "20,000", "20k", "20 000 €", "15,5k"
- * Gibt null zurück, wenn kein plausibler Betrag gefunden wurde.
- */
 function parseBudgetFromQuery(query) {
   const match = query.match(/(\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?)\s*(k|tsd|euro|€)?/i);
   if (!match) return null;
@@ -91,9 +46,7 @@ function parseBudgetFromQuery(query) {
   let numStr = match[1];
   const suffix = match[2]?.toLowerCase();
 
-  // Tausendertrennzeichen (Punkt, Komma oder Leerzeichen vor 3 Ziffern) entfernen
   numStr = numStr.replace(/[.,\s](?=\d{3}(\D|$))/g, '');
-  // verbleibendes Komma als Dezimaltrennzeichen interpretieren
   numStr = numStr.replace(',', '.');
 
   let value = parseFloat(numStr);
@@ -104,12 +57,6 @@ function parseBudgetFromQuery(query) {
   return value;
 }
 
-/**
- * Bewertet ein einzelnes Fahrzeug gegen eine Freitext-Suchanfrage.
- * Gibt { score, reasons, excluded } zurück.
- * excluded=true bedeutet: Fahrzeug passt nicht (z. B. Budget überschritten)
- * und wird unabhängig vom Score aussortiert.
- */
 function scoreCarAgainstQuery(car, query) {
   const q = query.toLowerCase();
   let score = 0;
@@ -152,9 +99,6 @@ function scoreCarAgainstQuery(car, query) {
   const wantsCheap = q.includes('günstig') || q.includes('sparen') || q.includes('niedrig');
   if (wantsCheap) {
     const estimate = getCostEstimate(car);
-    // Echte Werte haben Vorrang; fehlen sie, wird der Mittelwert der
-    // Richtwert-Bandbreite als Näherung herangezogen (klar als solche
-    // in der UI gekennzeichnet, siehe CostEstimateRow).
     const insurance = car.insurance_per_year || (estimate ? (estimate.insurance[0] + estimate.insurance[1]) / 2 : null);
     const maintenance = car.maintenance_per_year || (estimate ? (estimate.maintenance[0] + estimate.maintenance[1]) / 2 : null);
 
@@ -182,10 +126,6 @@ function getBootPercent(bootLiters) {
 function formatEuro(value) {
   return typeof value === 'number' ? `${value.toLocaleString('de-DE')} €` : '–';
 }
-
-// ============================================================
-// STYLES (zentral gesammelt statt pro Render neu erzeugt)
-// ============================================================
 
 const styles = {
   page: {
@@ -262,20 +202,11 @@ function getCostStyle(valA, valB) {
     : { color: '#f87171', background: 'rgba(248, 113, 113, 0.1)', padding: '4px 8px', borderRadius: '6px' };
 }
 
-// ============================================================
-// WIEDERVERWENDBARE UNTERKOMPONENTEN
-// ============================================================
-
 function CarSelect({ id, labelText, value, cars, onChange }) {
   return (
     <div>
       <label htmlFor={id} style={styles.label}>{labelText}</label>
-      <select
-        id={id}
-        value={value}
-        onChange={onChange}
-        style={styles.select}
-      >
+      <select id={id} value={value} onChange={onChange} style={styles.select}>
         {cars.map((c) => (
           <option key={c.id} value={c.id}>{c.brand} {c.model} ({c.year})</option>
         ))}
@@ -328,13 +259,6 @@ function CostRow({ label, carA, carB, field, formatter, highlightCheaper }) {
   );
 }
 
-/**
- * Zeigt Versicherung/Wartung an. Wenn das Fahrzeug echte Werte in
- * Supabase hat, werden diese exakt angezeigt (grün/rot markiert im
- * Vergleich). Fehlen echte Werte, wird stattdessen eine als solche
- * gekennzeichnete Bandbreite (Richtwert) angezeigt – niemals eine
- * erfundene Einzelzahl.
- */
 function CostEstimateRow({ label, carA, carB, field }) {
   const estA = getCostEstimate(carA);
   const estB = getCostEstimate(carB);
@@ -370,10 +294,6 @@ function CostEstimateRow({ label, carA, carB, field }) {
   );
 }
 
-// ============================================================
-// HAUPTKOMPONENTE
-// ============================================================
-
 export default function CarSizedPro() {
   const [cars, setCars] = useState([]);
   const [carAId, setCarAId] = useState(null);
@@ -386,19 +306,11 @@ export default function CarSizedPro() {
   const selectAId = useId();
   const selectBId = useId();
 
-  // Fahrzeuge aus Supabase laden
   useEffect(() => {
     let isMounted = true;
 
     async function fetchCars() {
-      if (!SUPABASE_URL || !SUPABASE_KEY) {
-        setLoadError('Keine Supabase-Konfiguration gefunden.');
-        setLoading(false);
-        return;
-      }
-
       try {
-        const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
         const { data, error } = await supabase.from('cars').select('*');
 
         if (!isMounted) return;
@@ -427,7 +339,6 @@ export default function CarSizedPro() {
   const carA = useMemo(() => cars.find((c) => c.id === carAId) || null, [cars, carAId]);
   const carB = useMemo(() => cars.find((c) => c.id === carBId) || null, [cars, carBId]);
 
-  // Suchergebnisse berechnen (memoized, kein separater State + Debounce-Timer nötig)
   const recommendations = useMemo(() => {
     const trimmed = userQuery.trim();
     if (!trimmed || cars.length === 0) return [];
@@ -454,7 +365,7 @@ export default function CarSizedPro() {
             ⚡ LADE FAHRZEUGDATEN...
           </div>
           <div style={{ height: '8px', width: '100%', backgroundColor: '#1e293b', borderRadius: '10px', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: '60%', backgroundColor: '#38bdf8', borderRadius: '10px', animation: 'pulse 1.5s infinite' }} />
+            <div style={{ height: '100%', width: '60%', backgroundColor: '#38bdf8', borderRadius: '10px' }} />
           </div>
         </div>
       </div>
@@ -490,9 +401,6 @@ export default function CarSizedPro() {
         <meta property="og:description" content="Next-Gen Vergleichsplattform für Fahrzeugdimensionen und Unterhaltskosten." />
       </Head>
 
-      {/* Sichtbar für Screenreader/Quellcode-Leser, aber optisch ausgeblendet.
-          Anders als ein JSX-Kommentar landet dieser Text tatsächlich im
-          gerenderten HTML-DOM. */}
       <span style={styles.visuallyHidden}>
         Developed and architected by Rene Berlips (2026) – AutoBerater Platform. All rights reserved.
       </span>
