@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Head from 'next/head';
 import { createClient } from '@supabase/supabase-js';
 
 export default function CarSizedPro() {
@@ -35,18 +36,27 @@ export default function CarSizedPro() {
     fetchCars();
   }, []);
 
-  // KI-Kaufberater Logik: Analysiert den Freitext auf Kriterien
+  // Hilfsfunktion zur Ausführung der KI-Suche mit externem Text
+  const runAiSearch = (queryText) => {
+    setUserQuery(queryText);
+    executeSearch(queryText);
+  };
+
   const handleAiSearch = () => {
-    if (!userQuery.trim() || cars.length === 0) return;
+    executeSearch(userQuery);
+  };
 
-    const query = userQuery.toLowerCase();
+  // KI-Kaufberater Logik
+  const executeSearch = (searchText) => {
+    if (!searchText.trim() || cars.length === 0) return;
 
-    // Scoring-System für die Autos
+    const query = searchText.toLowerCase();
+
     const scoredCars = cars.map(car => {
       let score = 0;
       let reasons = [];
 
-      // 1. Budget-Erkennung (z.B. "unter 30000", "30.000 €")
+      // 1. Budget-Erkennung
       const budgetMatch = query.match(/(\d+[\d\.]*)\s*(euro|€|k)?/);
       if (budgetMatch) {
         let maxBudget = parseFloat(budgetMatch[1].replace('.', ''));
@@ -56,6 +66,9 @@ export default function CarSizedPro() {
         if (price > 0 && price <= maxBudget) {
           score += 5;
           reasons.push(`Passt ins Budget (${price.toLocaleString()} €)`);
+        } else if (price > maxBudget) {
+          // Ausschluss bei Überschreiten des Budgets
+          score = -1;
         }
       }
 
@@ -71,7 +84,7 @@ export default function CarSizedPro() {
       }
 
       // 3. Alltag & Platz
-      if (query.includes('familie') || query.includes('groß') || query.includes('kofferraum') || query.includes('platz')) {
+      if (query.includes('familie') || query.includes('groß') || query.includes('kofferraum') || query.includes('platz') || query.includes('kombi')) {
         if ((car.boot_capacity_liters || 0) > 450) { score += 3; reasons.push('Großer Kofferraum'); }
       }
 
@@ -84,7 +97,6 @@ export default function CarSizedPro() {
       return { car, score, reasons };
     });
 
-    // Nach Punktzahl sortieren und Top-Ergebnisse filtern
     const sorted = scoredCars
       .filter(item => item.score > 0)
       .sort((a, b) => b.score - a.score);
@@ -92,10 +104,21 @@ export default function CarSizedPro() {
     setRecommendations(sorted.length > 0 ? sorted : [{ car: cars[0], score: 1, reasons: ['Standard-Empfehlungs-Match'] }]);
   };
 
+  // Farb-Vergleichsfunktion für die Kosten-Tabelle
+  const getCostStyle = (valA, valB) => {
+    if (!valA || !valB || valA === valB) return { color: '#f8fafc' };
+    return valA < valB ? { color: '#34d399', fontWeight: 'bold' } : { color: '#f87171' };
+  };
+
+  // Skeleton-Bildschirm beim Laden
   if (loading) {
     return (
-      <div style={{ padding: '60px', textAlign: 'center', fontFamily: 'system-ui, sans-serif', color: '#94a3b8', backgroundColor: '#0f172a', minHeight: '100vh' }}>
-        <h2>🚗 Lade Fahrzeug-Datenbank...</h2>
+      <div style={{ padding: '60px 20px', backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', justifyContent: 'center' }}>
+        <div style={{ maxWidth: '800px', width: '100%' }}>
+          <div style={{ height: '40px', backgroundColor: '#1e293b', borderRadius: '8px', marginBottom: '20px', animation: 'pulse 1.5s infinite' }} />
+          <div style={{ height: '150px', backgroundColor: '#1e293b', borderRadius: '16px', marginBottom: '20px' }} />
+          <div style={{ height: '200px', backgroundColor: '#1e293b', borderRadius: '16px' }} />
+        </div>
       </div>
     );
   }
@@ -112,6 +135,16 @@ export default function CarSizedPro() {
 
   return (
     <div style={{ fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#0f172a', color: '#f8fafc', minHeight: '100vh', padding: '30px 15px' }}>
+      
+      {/* SEO & OpenGraph Metadaten */}
+      <Head>
+        <title>Auto-Vergleicher & KI-Kaufberater | Größen- & Kostenvergleich</title>
+        <meta name="description" content="Vergleiche Autos nach Unterhaltskosten, Abmessungen und Verbrauch mit intelligenter KI-Kaufberatung." />
+        <meta property="og:title" content="Auto-Vergleicher & KI-Kaufberater" />
+        <meta property="og:description" content="Finde das perfekte Auto mit individuellem Größen- und Unterhaltskosten-Vergleich." />
+        <meta property="og:type" content="website" />
+      </Head>
+
       <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
         
         {/* Header */}
@@ -126,8 +159,36 @@ export default function CarSizedPro() {
         <section style={{ background: '#1e293b', padding: '25px', borderRadius: '16px', marginBottom: '40px', border: '1px solid #3b82f6' }}>
           <h2 style={{ fontSize: '1.4rem', color: '#60a5fa', marginBottom: '10px' }}>🤖 Smartes KI-Kaufberater-System</h2>
           <p style={{ color: '#94a3b8', fontSize: '0.95rem', marginBottom: '15px' }}>
-            Beschreiben Sie Ihre Wünsche in eigenen Worten (z. B. <i>"Ich suche einen Familien-Kombi mit Diesel unter 30000 Euro und günstiger Versicherung"</i>):
+            Beschreiben Sie Ihre Wünsche in eigenen Worten oder nutzen Sie die Schnell-Filter:
           </p>
+
+          {/* Schnell-Filter-Buttons */}
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '15px' }}>
+            <button 
+              onClick={() => runAiSearch('Sparsamer Diesel unter 20000 €')}
+              style={{ background: '#0f172a', color: '#38bdf8', border: '1px solid #334155', padding: '6px 12px', borderRadius: '20px', cursor: 'pointer', fontSize: '0.85rem' }}
+            >
+              ⛽ Sparsamer Diesel (&lt; 20k €)
+            </button>
+            <button 
+              onClick={() => runAiSearch('Familienkombi mit großem Kofferraum')}
+              style={{ background: '#0f172a', color: '#38bdf8', border: '1px solid #334155', padding: '6px 12px', borderRadius: '20px', cursor: 'pointer', fontSize: '0.85rem' }}
+            >
+              👨‍👩‍👧‍👦 Familienkombi (&gt; 450L)
+            </button>
+            <button 
+              onClick={() => runAiSearch('Elektroauto für die Stadt')}
+              style={{ background: '#0f172a', color: '#38bdf8', border: '1px solid #334155', padding: '6px 12px', borderRadius: '20px', cursor: 'pointer', fontSize: '0.85rem' }}
+            >
+              ⚡ Elektro für die Stadt
+            </button>
+            <button 
+              onClick={() => runAiSearch('Günstige Versicherung und niedrige Servicekosten')}
+              style={{ background: '#0f172a', color: '#38bdf8', border: '1px solid #334155', padding: '6px 12px', borderRadius: '20px', cursor: 'pointer', fontSize: '0.85rem' }}
+            >
+              ⭐ Günstiger Unterhalt
+            </button>
+          </div>
 
           <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
             <input 
@@ -206,7 +267,7 @@ export default function CarSizedPro() {
           </div>
         </section>
 
-        {/* 3. SEKTION: KOSTENVERGLEICH */}
+        {/* 3. SEKTION: KOSTENVERGLEICH MIT HIGHLIGHTING */}
         <section style={{ background: '#1e293b', borderRadius: '16px', overflow: 'hidden' }}>
           <div style={{ padding: '20px 25px', background: '#334155' }}>
             <h2 style={{ margin: 0, fontSize: '1.4rem' }}>💰 Detaillierter Kosten- & Zuverlässigkeitsvergleich</h2>
@@ -232,13 +293,21 @@ export default function CarSizedPro() {
               </tr>
               <tr style={{ borderBottom: '1px solid #334155' }}>
                 <td style={{ padding: '12px 20px' }}>Versicherung / Jahr</td>
-                <td style={{ padding: '12px 20px' }}>~{carA.insurance_per_year || 0} €</td>
-                <td style={{ padding: '12px 20px' }}>~{carB.insurance_per_year || 0} €</td>
+                <td style={{ padding: '12px 20px', ...getCostStyle(carA.insurance_per_year, carB.insurance_per_year) }}>
+                  ~{carA.insurance_per_year || 0} €
+                </td>
+                <td style={{ padding: '12px 20px', ...getCostStyle(carB.insurance_per_year, carA.insurance_per_year) }}>
+                  ~{carB.insurance_per_year || 0} €
+                </td>
               </tr>
               <tr style={{ borderBottom: '1px solid #334155' }}>
                 <td style={{ padding: '12px 20px' }}>Service- & Wartungskosten / Jahr</td>
-                <td style={{ padding: '12px 20px' }}>~{carA.maintenance_per_year || 0} €</td>
-                <td style={{ padding: '12px 20px' }}>~{carB.maintenance_per_year || 0} €</td>
+                <td style={{ padding: '12px 20px', ...getCostStyle(carA.maintenance_per_year, carB.maintenance_per_year) }}>
+                  ~{carA.maintenance_per_year || 0} €
+                </td>
+                <td style={{ padding: '12px 20px', ...getCostStyle(carB.maintenance_per_year, carA.maintenance_per_year) }}>
+                  ~{carB.maintenance_per_year || 0} €
+                </td>
               </tr>
               <tr style={{ borderBottom: '1px solid #334155' }}>
                 <td style={{ padding: '12px 20px' }}>Reparaturanfälligkeit</td>
