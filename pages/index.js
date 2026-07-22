@@ -1,256 +1,231 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 
-export default function CarComparator() {
-  const [makes, setMakes] = useState([]);
-  
-  // Auswahl Fahrzeug 1
-  const [selectedMakeA, setSelectedMakeA] = useState('volkswagen');
-  const [modelsA, setModelsA] = useState([]);
-  const [selectedModelA, setSelectedModelA] = useState('');
-  const [carDetailsA, setCarDetailsA] = useState(null);
-  
-  // Auswahl Fahrzeug 2
-  const [selectedMakeB, setSelectedMakeB] = useState('bmw');
-  const [modelsB, setModelsB] = useState([]);
-  const [selectedModelB, setSelectedModelB] = useState('');
-  const [carDetailsB, setCarDetailsB] = useState(null);
+// Beispiel-Datenstruktur im Carsized-Stil
+const INITIAL_CARS = [
+  {
+    id: 'vw-golf-8',
+    brand: 'Volkswagen',
+    model: 'Golf 8',
+    type: 'Kompaktklasse',
+    fuel: 'Benzin',
+    lengthMm: 4284,
+    heightMm: 1456,
+    newPrice: 28200,
+    usedPrice: 19500,
+    insurancePerYear: 650,
+    servicePerYear: 350,
+    consumption: '5.4 l/100km',
+    reliabilityIndex: 'Gut (8/10)',
+    imageUrl: 'https://images.unsplash.com/photo-1541899481282-d53bffe3c35d?auto=format&fit=crop&w=800&q=80'
+  },
+  {
+    id: 'tesla-model-y',
+    brand: 'Tesla',
+    model: 'Model Y',
+    type: 'SUV',
+    fuel: 'Elektro',
+    lengthMm: 4751,
+    heightMm: 1624,
+    newPrice: 44990,
+    usedPrice: 34000,
+    insurancePerYear: 890,
+    servicePerYear: 200,
+    consumption: '15.7 kWh/100km',
+    reliabilityIndex: 'Mittel (6/10)',
+    imageUrl: 'https://images.unsplash.com/photo-1560958089-b8a1929cea89?auto=format&fit=crop&w=800&q=80'
+  },
+  {
+    id: 'bmw-320d',
+    brand: 'BMW',
+    model: '3er Touring (Diesel)',
+    type: 'Kombi',
+    fuel: 'Diesel',
+    lengthMm: 4713,
+    heightMm: 1440,
+    newPrice: 52000,
+    usedPrice: 28000,
+    insurancePerYear: 920,
+    servicePerYear: 500,
+    consumption: '5.0 l/100km',
+    reliabilityIndex: 'Sehr Gut (9/10)',
+    imageUrl: 'https://images.unsplash.com/photo-1555215695-3004980ad54e?auto=format&fit=crop&w=800&q=80'
+  }
+];
 
-  const [loading, setLoading] = useState(true);
-  const [fetchingA, setFetchingA] = useState(false);
-  const [fetchingB, setFetchingB] = useState(false);
+export default function CarSizedPro() {
+  const [cars] = useState(INITIAL_CARS);
+  const [carA, setCarA] = useState(INITIAL_CARS[0]);
+  const [carB, setCarB] = useState(INITIAL_CARS[1]);
 
-  // 1. Marken laden
-  useEffect(() => {
-    async function fetchMakes() {
-      try {
-        const res = await fetch('https://vpic.nhtsa.dot.gov/api/vehicles/getallmakes?format=json');
-        const data = await res.json();
-        if (data && data.Results) {
-          const popularMakes = ['volkswagen', 'bmw', 'audi', 'mercedes-benz', 'tesla', 'toyota', 'porsche', 'ford', 'hyundai', 'kia', 'fiat', 'volvo'];
-          const sortedMakes = data.Results
-            .filter(m => popularMakes.includes(m.Make_Name.toLowerCase()))
-            .sort((a, b) => a.Make_Name.localeCompare(b.Make_Name));
-            
-          setMakes(sortedMakes.length > 0 ? sortedMakes : data.Results.slice(0, 50));
-        }
-      } catch (err) {
-        console.error('Fehler beim Laden der Marken:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchMakes();
-  }, []);
+  // Filter für den Bedarfs-Rechner
+  const [maxBudget, setMaxBudget] = useState(40000);
+  const [selectedFuel, setSelectedFuel] = useState('Alle');
+  const [recommendedCar, setRecommendedCar] = useState(null);
 
-  // 2. Modelle für Marke A laden
-  useEffect(() => {
-    if (!selectedMakeA) return;
-    async function fetchModelsA() {
-      try {
-        const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/getmodelsformake/${selectedMakeA}?format=json`);
-        const data = await res.json();
-        if (data && data.Results) {
-          setModelsA(data.Results);
-          if (data.Results.length > 0) setSelectedModelA(data.Results[0].Model_Name);
-        }
-      } catch (err) {
-        console.error(err);
-      }
-    }
-    fetchModelsA();
-  }, [selectedMakeA]);
-
-  // 3. Modelle für Marke B laden
-  useEffect(() => {
-    if (!selectedMakeB) return;
-    async function fetchModelsB() {
-      try {
-        const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/getmodelsformake/${selectedMakeB}?format=json`);
-        const data = await res.json();
-        if (data && data.Results) {
-          setModelsB(data.Results);
-          if (data.Results.length > 0) setSelectedModelB(data.Results[0].Model_Name);
-        }
-      } catch (err) {
-        console.error(err);
-      }
-    }
-    fetchModelsB();
-  }, [selectedMakeB]);
-
-  // Funktion zum Abrufen der Detaildaten für ein ausgewähltes Modell
-  const fetchCarSpecs = async (make, model, target) => {
-    if (target === 'A') setFetchingA(true);
-    if (target === 'B') setFetchingB(true);
-
-    try {
-      // Abfrage über die API
-      const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/getmodelsformakeyear/make/${make}/vehicleType/car?format=json`);
-      const data = await res.json();
-      
-      // Beispielhafte Modell-Aufbereitung / Platzhalter-Logik basierend auf Realwerten
-      const isElectric = model.toLowerCase().includes('i3') || model.toLowerCase().includes('id') || make.toLowerCase() === 'tesla';
-      const isHybrid = model.toLowerCase().includes('hybrid') || model.toLowerCase().includes('phev');
-
-      const dummySpecs = {
-        make: make.toUpperCase(),
-        model: model,
-        fuelType: isElectric ? 'Elektro' : isHybrid ? 'Plug-in-Hybrid' : 'Benzin / Diesel',
-        powerHp: Math.floor(Math.random() * (300 - 110 + 1)) + 110, // PS-Bereich
-        lengthMm: Math.floor(Math.random() * (4900 - 4100 + 1)) + 4100, // Länge
-        bootLiters: Math.floor(Math.random() * (550 - 350 + 1)) + 350, // Kofferraum
-        crates: Math.floor(Math.random() * (7 - 3 + 1)) + 3,
-        yearlyCosts: Math.floor(Math.random() * (3500 - 2000 + 1)) + 2000
-      };
-
-      if (target === 'A') setCarDetailsA(dummySpecs);
-      if (target === 'B') setCarDetailsB(dummySpecs);
-    } catch (err) {
-      console.error('Fehler beim Abrufen der Fahrzeugdetails:', err);
-    } finally {
-      if (target === 'A') setFetchingA(false);
-      if (target === 'B') setFetchingB(false);
-    }
+  // Bedarfs-Rechner Logik
+  const findMatchingCar = () => {
+    const match = cars.find(c => 
+      c.usedPrice <= maxBudget && 
+      (selectedFuel === 'Alle' || c.fuel === selectedFuel)
+    );
+    setRecommendedCar(match || null);
   };
 
-  if (loading) {
-    return (
-      <div style={{ padding: '60px', textAlign: 'center', fontFamily: 'system-ui, sans-serif' }}>
-        <h2>🚗 Lade Fahrzeug-Marken...</h2>
-      </div>
-    );
-  }
+  // Maßstabsskalierung basierend auf der größten Fahrzeuglänge (z.B. 5000 mm max)
+  const getWidthPercent = (lengthMm) => (lengthMm / 5000) * 100;
 
   return (
-    <div style={{ fontFamily: 'system-ui, sans-serif', backgroundColor: '#f8fafc', minHeight: '100vh', padding: '30px 15px', color: '#0f172a' }}>
-      <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
+    <div style={{ fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#0f172a', color: '#f8fafc', minHeight: '100vh', padding: '30px 15px' }}>
+      <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
         
-        <header style={{ textAlign: 'center', marginBottom: '35px' }}>
-          <h1 style={{ fontSize: '2.2rem', fontWeight: '800', color: '#1e293b' }}>
-            🚘 Live Auto-Datenabfrage
+        {/* Header */}
+        <header style={{ textAlign: 'center', marginBottom: '40px' }}>
+          <h1 style={{ fontSize: '2.5rem', fontWeight: '900', color: '#38bdf8' }}>
+            📐 CARSIZED + KOSTEN-VERGLEICH
           </h1>
-          <p style={{ color: '#64748b' }}>
-            Wählen Sie Marke und Modell aus und rufen Sie die technischen Daten auf Knopfdruck ab.
-          </p>
+          <p style={{ color: '#94a3b8' }}>Visueller Größenvergleich, Kostenanalyse & intelligenter Kaufberater</p>
         </header>
 
-        {/* Formular-Bereich */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', marginBottom: '30px' }}>
+        {/* 1. SEKTION: VISUELLER GRÖSSENVERGLEICH */}
+        <section style={{ background: '#1e293b', padding: '25px', borderRadius: '16px', marginBottom: '40px' }}>
+          <h2 style={{ fontSize: '1.4rem', marginBottom: '20px', color: '#38bdf8' }}>📏 Visueller Maßstabs-Vergleich</h2>
           
-          {/* Auto 1 */}
-          <div style={{ background: '#ffffff', padding: '20px', borderRadius: '16px', borderTop: '6px solid #3b82f6', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-            <h3 style={{ marginTop: 0, color: '#2563eb' }}>Fahrzeug 1</h3>
-            
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '4px' }}>Marke:</label>
-            <select 
-              value={selectedMakeA} 
-              onChange={(e) => setSelectedMakeA(e.target.value)}
-              style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', marginBottom: '12px', fontSize: '1rem' }}
-            >
-              {makes.map(m => (
-                <option key={m.Make_ID} value={m.Make_Name.toLowerCase()}>{m.Make_Name}</option>
-              ))}
-            </select>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+            <div>
+              <label style={{ fontSize: '0.85rem', color: '#94a3b8' }}>FAHRZEUG 1</label>
+              <select 
+                value={carA.id} 
+                onChange={(e) => setCarA(cars.find(c => c.id === e.target.value))}
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', background: '#0f172a', color: '#fff', border: '1px solid #334155' }}
+              >
+                {cars.map(c => <option key={c.id} value={c.id}>{c.brand} {c.model}</option>)}
+              </select>
+            </div>
 
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '4px' }}>Modell:</label>
-            <select 
-              value={selectedModelA}
-              onChange={(e) => setSelectedModelA(e.target.value)}
-              style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', marginBottom: '15px', fontSize: '1rem' }}
-            >
-              {modelsA.map(m => (
-                <option key={m.Model_ID} value={m.Model_Name}>{m.Model_Name}</option>
-              ))}
-            </select>
-
-            <button 
-              onClick={() => fetchCarSpecs(selectedMakeA, selectedModelA, 'A')}
-              disabled={fetchingA}
-              style={{ width: '100%', padding: '12px', backgroundColor: '#3b82f6', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}
-            >
-              {fetchingA ? 'Lade Daten...' : '🔍 Daten abrufen'}
-            </button>
+            <div>
+              <label style={{ fontSize: '0.85rem', color: '#94a3b8' }}>FAHRZEUG 2</label>
+              <select 
+                value={carB.id} 
+                onChange={(e) => setCarB(cars.find(c => c.id === e.target.value))}
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', background: '#0f172a', color: '#fff', border: '1px solid #334155' }}
+              >
+                {cars.map(c => <option key={c.id} value={c.id}>{c.brand} {c.model}</option>)}
+              </select>
+            </div>
           </div>
 
-          {/* Auto 2 */}
-          <div style={{ background: '#ffffff', padding: '20px', borderRadius: '16px', borderTop: '6px solid #ef4444', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-            <h3 style={{ marginTop: 0, color: '#dc2626' }}>Fahrzeug 2</h3>
-            
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '4px' }}>Marke:</label>
-            <select 
-              value={selectedMakeB} 
-              onChange={(e) => setSelectedMakeB(e.target.value)}
-              style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', marginBottom: '12px', fontSize: '1rem' }}
-            >
-              {makes.map(m => (
-                <option key={m.Make_ID} value={m.Make_Name.toLowerCase()}>{m.Make_Name}</option>
-              ))}
-            </select>
+          {/* Grafischer Längenvergleich im Maßstab */}
+          <div style={{ background: '#0f172a', padding: '20px', borderRadius: '12px' }}>
+            <div style={{ marginBottom: '20px' }}>
+              <div style={{ fontSize: '0.9rem', marginBottom: '5px' }}>{carA.brand} {carA.model} ({carA.lengthMm} mm)</div>
+              <div style={{ width: `${getWidthPercent(carA.lengthMm)}%`, height: '50px', backgroundColor: '#38bdf8', borderRadius: '6px', transition: 'width 0.3s ease' }} />
+            </div>
 
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '4px' }}>Modell:</label>
-            <select 
-              value={selectedModelB}
-              onChange={(e) => setSelectedModelB(e.target.value)}
-              style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', marginBottom: '15px', fontSize: '1rem' }}
-            >
-              {modelsB.map(m => (
-                <option key={m.Model_ID} value={m.Model_Name}>{m.Model_Name}</option>
-              ))}
-            </select>
+            <div>
+              <div style={{ fontSize: '0.9rem', marginBottom: '5px' }}>{carB.brand} {carB.model} ({carB.lengthMm} mm)</div>
+              <div style={{ width: `${getWidthPercent(carB.lengthMm)}%`, height: '50px', backgroundColor: '#f43f5e', borderRadius: '6px', transition: 'width 0.3s ease' }} />
+            </div>
+          </div>
+        </section>
 
-            <button 
-              onClick={() => fetchCarSpecs(selectedMakeB, selectedModelB, 'B')}
-              disabled={fetchingB}
-              style={{ width: '100%', padding: '12px', backgroundColor: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}
-            >
-              {fetchingB ? 'Lade Daten...' : '🔍 Daten abrufen'}
-            </button>
+        {/* 2. SEKTION: DETAILLIERTER KOSTENVERGLEICH */}
+        <section style={{ background: '#1e293b', borderRadius: '16px', overflow: 'hidden', marginBottom: '40px' }}>
+          <div style={{ padding: '20px 25px', background: '#334155' }}>
+            <h2 style={{ margin: 0, fontSize: '1.4rem' }}>💰 Detaillierter Kosten- & Zuverlässigkeitsvergleich</h2>
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #334155', color: '#94a3b8' }}>
+                <th style={{ padding: '15px 20px' }}>Kriterium</th>
+                <th style={{ padding: '15px 20px', color: '#38bdf8' }}>{carA.brand} {carA.model}</th>
+                <th style={{ padding: '15px 20px', color: '#f43f5e' }}>{carB.brand} {carB.model}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style={{ borderBottom: '1px solid #334155' }}>
+                <td style={{ padding: '12px 20px' }}>Neupreis (UVP)</td>
+                <td style={{ padding: '12px 20px' }}>{carA.newPrice.toLocaleString()} €</td>
+                <td style={{ padding: '12px 20px' }}>{carB.newPrice.toLocaleString()} €</td>
+              </tr>
+              <tr style={{ borderBottom: '1px solid #334155' }}>
+                <td style={{ padding: '12px 20px' }}>Gebrauchtwagenpreis (ca.)</td>
+                <td style={{ padding: '12px 20px' }}>{carA.usedPrice.toLocaleString()} €</td>
+                <td style={{ padding: '12px 20px' }}>{carB.usedPrice.toLocaleString()} €</td>
+              </tr>
+              <tr style={{ borderBottom: '1px solid #334155' }}>
+                <td style={{ padding: '12px 20px' }}>Versicherung kosten / Jahr</td>
+                <td style={{ padding: '12px 20px' }}>~{carA.insurancePerYear} €</td>
+                <td style={{ padding: '12px 20px' }}>~{carB.insurancePerYear} €</td>
+              </tr>
+              <tr style={{ borderBottom: '1px solid #334155' }}>
+                <td style={{ padding: '12px 20px' }}>Service- & Wartungskosten / Jahr</td>
+                <td style={{ padding: '12px 20px' }}>~{carA.servicePerYear} €</td>
+                <td style={{ padding: '12px 20px' }}>~{carB.servicePerYear} €</td>
+              </tr>
+              <tr style={{ borderBottom: '1px solid #334155' }}>
+                <td style={{ padding: '12px 20px' }}>Durchschnittsverbrauch</td>
+                <td style={{ padding: '12px 20px' }}>{carA.consumption}</td>
+                <td style={{ padding: '12px 20px' }}>{carB.consumption}</td>
+              </tr>
+              <tr>
+                <td style={{ padding: '12px 20px' }}>Reparaturanfälligkeit</td>
+                <td style={{ padding: '12px 20px' }}>{carA.reliabilityIndex}</td>
+                <td style={{ padding: '12px 20px' }}>{carB.reliabilityIndex}</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        {/* 3. SEKTION: BEDARFS-RECHNER (KAUFBERATER) */}
+        <section style={{ background: '#1e293b', padding: '25px', borderRadius: '16px' }}>
+          <h2 style={{ fontSize: '1.4rem', color: '#10b981', marginBottom: '15px' }}>🎯 Intelligenter Kaufberater</h2>
+          <p style={{ color: '#94a3b8', marginBottom: '20px' }}>Geben Sie Ihre Präferenzen ein, um das passende Fahrzeug vorgeschlagen zu bekommen.</p>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px', marginBottom: '20px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '5px' }}>Maximales Budget (Gebraucht): {maxBudget.toLocaleString()} €</label>
+              <input 
+                type="range" 
+                min="10000" 
+                max="60000" 
+                step="2500" 
+                value={maxBudget} 
+                onChange={(e) => setMaxBudget(Number(e.target.value))}
+                style={{ width: '100%' }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '5px' }}>Bevorzugter Antrieb:</label>
+              <select 
+                value={selectedFuel} 
+                onChange={(e) => setSelectedFuel(e.target.value)}
+                style={{ width: '100%', padding: '8px', borderRadius: '8px', background: '#0f172a', color: '#fff', border: '1px solid #334155' }}
+              >
+                <option value="Alle">Alle Antriebe</option>
+                <option value="Benzin">Benzin</option>
+                <option value="Diesel">Diesel</option>
+                <option value="Elektro">Elektro</option>
+              </select>
+            </div>
           </div>
 
-        </div>
+          <button 
+            onClick={findMatchingCar}
+            style={{ padding: '12px 24px', backgroundColor: '#10b981', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', width: '100%' }}
+          >
+            Passendes Auto finden
+          </button>
 
-        {/* Ergebnis-Vergleichsanzeige */}
-        {(carDetailsA || carDetailsB) && (
-          <div style={{ background: '#ffffff', padding: '25px', borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-            <h2 style={{ marginTop: 0, fontSize: '1.4rem' }}>📊 Technischer Datenvergleich</h2>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-              <thead>
-                <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                  <th style={{ padding: '12px' }}>Eigenschaft</th>
-                  <th style={{ padding: '12px', color: '#2563eb' }}>{carDetailsA ? `${carDetailsA.make} ${carDetailsA.model}` : 'Keine Daten'}</th>
-                  <th style={{ padding: '12px', color: '#dc2626' }}>{carDetailsB ? `${carDetailsB.make} ${carDetailsB.model}` : 'Keine Daten'}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '12px', fontWeight: 'bold' }}>Antriebsart</td>
-                  <td style={{ padding: '12px' }}>{carDetailsA?.fuelType || '-'}</td>
-                  <td style={{ padding: '12px' }}>{carDetailsB?.fuelType || '-'}</td>
-                </tr>
-                <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '12px', fontWeight: 'bold' }}>Leistung (ca.)</td>
-                  <td style={{ padding: '12px' }}>{carDetailsA ? `${carDetailsA.powerHp} PS` : '-'}</td>
-                  <td style={{ padding: '12px' }}>{carDetailsB ? `${carDetailsB.powerHp} PS` : '-'}</td>
-                </tr>
-                <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '12px', fontWeight: 'bold' }}>Fahrzeuglänge</td>
-                  <td style={{ padding: '12px' }}>{carDetailsA ? `${carDetailsA.lengthMm} mm` : '-'}</td>
-                  <td style={{ padding: '12px' }}>{carDetailsB ? `${carDetailsB.lengthMm} mm` : '-'}</td>
-                </tr>
-                <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '12px', fontWeight: 'bold' }}>Kofferraumvolumen</td>
-                  <td style={{ padding: '12px' }}>{carDetailsA ? `${carDetailsA.bootLiters} Liter` : '-'}</td>
-                  <td style={{ padding: '12px' }}>{carDetailsB ? `${carDetailsB.bootLiters} Liter` : '-'}</td>
-                </tr>
-                <tr>
-                  <td style={{ padding: '12px', fontWeight: 'bold' }}>Geschätzte Jahreskosten</td>
-                  <td style={{ padding: '12px' }}>{carDetailsA ? `~${carDetailsA.yearlyCosts} € / Jahr` : '-'}</td>
-                  <td style={{ padding: '12px' }}>{carDetailsB ? `~${carDetailsB.yearlyCosts} € / Jahr` : '-'}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        )}
+          {recommendedCar && (
+            <div style={{ marginTop: '20px', padding: '15px', background: '#064e3b', borderRadius: '8px', border: '1px solid #10b981' }}>
+              <h3 style={{ margin: '0 0 5px 0' }}>Empfehlung: {recommendedCar.brand} {recommendedCar.model}</h3>
+              <p style={{ margin: 0, fontSize: '0.9rem' }}>
+                Preis: ca. {recommendedCar.usedPrice.toLocaleString()} € | Antrieb: {recommendedCar.fuel} | Verbrauch: {recommendedCar.consumption}
+              </p>
+            </div>
+          )}
+        </section>
 
       </div>
     </div>
